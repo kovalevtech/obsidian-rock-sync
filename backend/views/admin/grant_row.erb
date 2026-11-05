@@ -1,0 +1,35 @@
+<%# One grant of the scoped token form: a tbody of its own, so Remove takes its purpose and error rows along. i: the
+    row's index in the form ('__i__' in the template); folders: the vaults' current folders. The purpose folds away
+    (details, no JS; a closed one still submits): closed it shows its first line or "Add purpose", open by itself only
+    when it's too long %>
+<% missing = !grant[:folder].empty? && !folders.fetch(grant[:vault], []).include?(grant[:folder]) %>
+<% purpose = grant[:purpose].to_s %>
+<tbody class="grant">
+  <tr>
+    <td>
+      <select name="grants[<%= i %>][vault]" aria-label="Vault">
+        <% folders.each_key do |vault| %><option value="<%= h vault %>"<%= ' selected' if vault == grant[:vault] %>><%= h vault %></option><% end %>
+      </select>
+    </td>
+    <td>
+      <input class="cell" name="grants[<%= i %>][folder]" value="<%= h grant[:folder] %>" list="scoped-folders" placeholder="/ (the whole vault)" aria-label="Folder">
+      <% if missing %><span class="chip warn">folder missing</span><% end %>
+    </td>
+    <td>
+      <select name="grants[<%= i %>][mode]" aria-label="Mode">
+        <% Grants::MODES.each do |mode| %><option<%= ' selected' if mode == grant[:mode] %>><%= mode %></option><% end %>
+      </select>
+    </td>
+    <td><button type="button" class="btn danger small" onclick="this.closest('tbody').remove()">Remove</button></td>
+  </tr>
+  <tr class="purpose">
+    <td colspan="4">
+      <details<%= ' open' if purpose.length > Grants::MAX_PURPOSE %>>
+        <summary><% if purpose.empty? %><span class="add">Add purpose</span><% else %><span class="label">Purpose</span><span class="preview"><span><%= h purpose.lines.first.chomp %></span></span><% end %></summary>
+        <textarea class="cell" name="grants[<%= i %>][purpose]" rows="3" maxlength="<%= Grants::MAX_PURPOSE %>" aria-label="Purpose"
+                  placeholder="Claude sees this: what the folder is for, how to use it"><%= h purpose %></textarea>
+      </details>
+    </td>
+  </tr>
+  <% if error %><tr class="row-error"><td colspan="4" class="error"><%= h error %></td></tr><% end %>
+</tbody>

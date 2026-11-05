@@ -1,0 +1,73 @@
+<% @title = 'Scoped tokens' %>
+<% revoked = @scoped && @scoped[:revoked_at] %>
+<% folders = Vault.names.to_h { [_1, Vault.find(_1)&.folders || []] } %>
+<% errors = @errors || {} %>
+<section class="paper narrow">
+  <div class="paper-head">
+    <h2><%= @scoped ? h(@scoped[:name]) : 'New scoped token' %></h2>
+    <% if revoked %>
+      <span class="chip">Revoked <%= time(revoked) %></span>
+    <% elsif @scoped %>
+      <span class="chip active">Active</span>
+      <form class="inline" method="post" action="<%= path("/scoped/#{@scoped[:id]}/revoke") %>"
+            onsubmit="return confirm('Revoke <%= h @scoped[:name] %>? Claude\'s connector with it stops working.')">
+        <%= csrf_field %><button class="btn danger small">Revoke</button>
+      </form>
+    <% end %>
+  </div>
+
+  <% if @token %>
+    <div class="paper-body">
+      <p class="muted">The token is shown once, it won't be shown again: put it into 1Password. Then claude.ai → Settings → Connectors → Add custom connector: this URL, <strong>No sign-in</strong>, and under <strong>Request headers</strong> the header <code>Authorization</code> with the value below.</p>
+      <code class="token"><%= h @mcp_url %></code>
+      <code class="token" id="token">Bearer <%= h @token %></code>
+      <button type="button" class="btn contained" onclick="navigator.clipboard.writeText(document.getElementById('token').textContent)
+        .then(() => { this.lastChild.textContent = 'Copied' })"><%= icon(:copy) %><span>Copy header value</span></button>
+    </div>
+  <% end %>
+
+  <% if @scoped %>
+    <p class="paper-body muted">Created <%= time(@scoped[:created_at]) %> · last used <%= time(@scoped[:last_seen_at]) || '—' %></p>
+  <% end %>
+
+  <% if revoked %>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Vault</th><th>Folder</th><th>Mode</th></tr></thead>
+        <tbody>
+          <% @form[:grants].each do |grant| %>
+            <tr class="revoked"><td><%= h grant[:vault] %></td><td><%= h grant[:folder].empty? ? '/' : grant[:folder] %></td><td><%= grant[:mode] %></td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    <div class="paper-body"><a class="btn" href="<%= path('/scoped') %>">Back</a></div>
+  <% else %>
+    <form class="paper-body" method="post" action="<%= path(@scoped ? "/scoped/#{@scoped[:id]}" : '/scoped') %>">
+      <%= csrf_field %>
+      <label class="field"><input name="name" placeholder=" " pattern="[a-z0-9\-]{1,64}" required value="<%= h @form[:name] %>"><span>Name</span></label>
+      <% if errors[:name] %><p class="error"><%= h errors[:name] %></p><% end %>
+      <p class="muted hint">The commits' author. Lowercase letters, digits and dashes.</p>
+
+      <div class="scroll">
+        <table class="grants">
+          <thead><tr><th>Vault</th><th>Folder</th><th>Mode</th><th></th></tr></thead>
+          <% @form[:grants].each_with_index do |grant, i| %>
+            <%= erb :grant_row, layout: false, locals: { i:, grant:, error: errors[i], folders: } %>
+          <% end %>
+        </table>
+      </div>
+      <template id="grant-row"><%= erb :grant_row, layout: false, locals: { i: '__i__', grant: { vault: folders.keys.first, folder: '', mode: 'rw', purpose: '' }, error: nil, folders: } %></template>
+      <datalist id="scoped-folders"><% folders.values.flatten.uniq.sort.each do |folder| %><option value="<%= h folder %>"><% end %></datalist>
+      <% if errors[:base] %><p class="error"><%= h errors[:base] %></p><% end %>
+      <p class="muted hint grants-hint">Folder and its subfolders; empty or <strong>/</strong> = the whole vault. <strong>r</strong> = list and read files, <strong>w</strong> = create, append and replace, <strong>rw</strong> = both, and delete. Grants may overlap: their modes add up, so a grant inside another one only adds what that one doesn't give. A purpose tells Claude what the folder is for.</p>
+
+      <div class="row">
+        <button type="button" class="btn" onclick="this.form.querySelector('table.grants').insertAdjacentHTML('beforeend', document.getElementById('grant-row').innerHTML.replaceAll('__i__', Date.now()))"><%= icon(:add) %>Add grant</button>
+        <span class="spacer"></span>
+        <a class="btn" href="<%= path('/scoped') %>"><%= @token ? 'Done' : 'Cancel' %></a>
+        <button class="btn contained"><%= @scoped ? 'Save' : 'Create token' %></button>
+      </div>
+    </form>
+  <% end %>
+</section>

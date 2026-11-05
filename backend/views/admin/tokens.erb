@@ -1,0 +1,51 @@
+<% @title = 'Device tokens' %>
+<% show_revoked = params['revoked'] == '1' %>
+<% all = Devices.list %>
+<% tokens = show_revoked ? all : all.reject { _1[:revoked_at] } %>
+<section class="paper">
+  <div class="paper-head">
+    <h2>Device tokens</h2>
+    <form class="inline" method="get" action="<%= path('/tokens') %>">
+      <label class="check"><input type="checkbox" name="revoked" value="1"<%= ' checked' if show_revoked %> onchange="this.form.submit()">Show revoked</label>
+    </form>
+    <a class="btn contained" href="<%= path('/connect') %>"><%= icon(:add) %>Connect device</a>
+  </div>
+  <% if @tokens_error %><p class="paper-body error"><%= h @tokens_error %></p><% end %>
+  <% if tokens.empty? %>
+    <div class="paper-body muted"><%= all.empty? ? 'None yet.' : 'No active tokens.' %></div>
+  <% else %>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Device</th><th>Vault</th><th>Created</th><th>Last seen</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          <% tokens.each do |device| %>
+            <tr class="<%= 'revoked' if device[:revoked_at] %>">
+              <td><%= h device[:name] %></td>
+              <td><%= h device[:vault] %></td>
+              <td class="muted"><%= time(device[:created_at]) %></td>
+              <td class="muted"><%= time(device[:last_seen_at]) || '—' %></td>
+              <td>
+                <% if device[:revoked_at] %>
+                  <span class="chip">Revoked <%= time(device[:revoked_at]) %></span>
+                <% else %>
+                  <span class="chip active">Active</span>
+                <% end %>
+              </td>
+              <td class="nowrap">
+                <% unless device[:revoked_at] %>
+                  <form class="inline" method="post" action="<%= path("/tokens/#{device[:id]}/reconnect") %>">
+                    <%= csrf_field %><button class="btn small" title="A code giving this device a new token: same name, same vault">Reconnect</button>
+                  </form>
+                  <form class="inline" method="post" action="<%= path("/tokens/#{device[:id]}/revoke") %>"
+                        onsubmit="return confirm('Revoke the token of <%= h device[:name] %>? It stops working.')">
+                    <%= csrf_field %><button class="btn danger small">Revoke</button>
+                  </form>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>

@@ -1,0 +1,307 @@
+/* Conflict view: its own CodeMirror editor (no Obsidian markdown), styled like the note editor.
+   No bottom padding, like Obsidian's markdown views: the generic view padding-bottom uses --safe-area-inset-bottom, which on
+   Android includes the open keyboard — the editor would shrink to a sliver above it */
+.workspace-leaf-content[data-type='rock-sync-conflict'] .view-content {
+  padding: var(--size-4-3) var(--size-4-3) 0;
+}
+
+.rock-sync-conflict-view .cm-editor {
+  height: 100%;
+}
+
+.rock-sync-conflict-view .cm-editor.cm-focused {
+  outline: none;
+}
+
+.rock-sync-conflict-view .cm-scroller {
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+  line-height: var(--line-height-normal);
+  color: var(--text-normal);
+}
+
+.rock-sync-conflict-view .cm-content {
+  max-width: var(--file-line-width);
+  margin: 0 auto;
+  padding: var(--size-4-8) var(--file-margins);
+  caret-color: var(--caret-color);
+}
+
+.rock-sync-header-arrow {
+  display: inline-flex;
+  vertical-align: middle;
+  padding: 0 2px;
+}
+
+/* Each block is one card: server caption + lines (grey bar), mine caption + lines (red bar, continuing the grey
+   one), buttons; or a Result (blue bar) after the separator was deleted. Pieced together from the widgets and the
+   lines between them, each with the card's background; the bars are drawn into that background at the card's
+   padding. No word highlights */
+body {
+  --rock-sync-card-bg: var(--background-secondary);
+  --rock-sync-card-pad: 12px;
+  --rock-sync-bar: 2px;
+  --rock-sync-indent: calc(var(--rock-sync-card-pad) + var(--rock-sync-bar) + 10px); /* text: 10px right of the bar */
+  --rock-sync-server-bar: var(--background-modifier-border-hover);
+  --rock-sync-mine-bar: var(--color-red);
+  --rock-sync-result-bar: var(--color-blue);
+}
+
+.rock-sync-conflict-view .cm-line.rock-sync-server-line,
+.rock-sync-label-server .rock-sync-label-row {
+  background: linear-gradient(var(--rock-sync-server-bar), var(--rock-sync-server-bar))
+    no-repeat var(--rock-sync-card-pad) 0 / var(--rock-sync-bar) 100%, var(--rock-sync-card-bg);
+}
+
+.rock-sync-conflict-view .cm-line.rock-sync-mine-line,
+.rock-sync-label-mine .rock-sync-label-row {
+  background: linear-gradient(var(--rock-sync-mine-bar), var(--rock-sync-mine-bar))
+    no-repeat var(--rock-sync-card-pad) 0 / var(--rock-sync-bar) 100%, var(--rock-sync-card-bg);
+}
+
+.rock-sync-conflict-view .cm-line.rock-sync-result-line,
+.rock-sync-label-result .rock-sync-label-row {
+  background: linear-gradient(var(--rock-sync-result-bar), var(--rock-sync-result-bar))
+    no-repeat var(--rock-sync-card-pad) 0 / var(--rock-sync-bar) 100%, var(--rock-sync-card-bg);
+}
+
+.rock-sync-conflict-view .cm-line.rock-sync-server-line,
+.rock-sync-conflict-view .cm-line.rock-sync-mine-line,
+.rock-sync-conflict-view .cm-line.rock-sync-result-line {
+  padding-inline: var(--rock-sync-indent) var(--rock-sync-card-pad);
+}
+
+.rock-sync-card {
+  background-color: var(--rock-sync-card-bg);
+}
+
+/* Card top: 12px from the text above (outside), 10px padding (inside) */
+.rock-sync-label-server,
+.rock-sync-label-result {
+  padding-top: 12px;
+}
+
+.rock-sync-label-server .rock-sync-card,
+.rock-sync-label-result .rock-sync-card {
+  padding-top: 10px;
+  border-radius: 8px 8px 0 0;
+}
+
+/* Between the sides: no gap, the bar runs on from grey to red; the mine caption's own padding (inside its bar)
+   sets the sides apart */
+.rock-sync-label-mine .rock-sync-label-row {
+  padding-top: 8px;
+}
+
+/* Captions: the first line inside their side's bar */
+.rock-sync-label-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-inline: var(--rock-sync-indent) var(--rock-sync-card-pad);
+  font-family: var(--font-interface);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.rock-sync-label-icon {
+  display: flex;
+}
+
+.rock-sync-label-icon .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Card bottom: the buttons 10px under my lines, aligned with the text; 12px to the text after the card.
+   Same on mobile */
+.rock-sync-buttons {
+  padding-bottom: 12px;
+}
+
+.rock-sync-buttons .rock-sync-card {
+  display: flex;
+  gap: 14px;
+  padding: 10px var(--rock-sync-card-pad) 10px var(--rock-sync-indent);
+  border-radius: 0 0 8px 8px;
+}
+
+.rock-sync-buttons button {
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--text-accent);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.rock-sync-buttons button:hover {
+  text-decoration: underline;
+  background: none;
+}
+
+/* File tree dots (one per file and its parent folders, by priority): red = open conflict (a note not pushed yet),
+   yellow = conflict copy (keep both), yellow ring = waiting for review after the first sync, grey = not synced yet
+   (queued, or the last push failed) */
+body {
+  --rock-sync-dot-size: 6px;
+  --rock-sync-dot-conflict: var(--color-red);
+  --rock-sync-dot-copy: var(--color-yellow);
+  --rock-sync-dot-review: var(--rock-sync-dot-copy);
+  --rock-sync-ring-width: 1.5px;
+  --rock-sync-dot-pending: var(--text-faint);
+}
+
+/* Bar at the top of a file: deleted on another device (Delete / Keep), or a conflict copy (Replace original /
+   Delete copy). In notes above the title, in other views (image, PDF, …) at the top of their content */
+.rock-sync-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-4);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-radius: 8px;
+  background-color: var(--background-secondary);
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+/* Above views whose content is positioned over the whole view (canvas: .canvas-wrapper, inset 0) */
+.rock-sync-bar-in-view {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  margin: var(--size-4-2) var(--size-4-3);
+}
+
+/* Canvas: clear of its control column on the right */
+.workspace-leaf-content[data-type='canvas'] .rock-sync-bar-in-view {
+  margin-inline-end: calc(var(--size-4-3) + 48px);
+}
+
+.rock-sync-bar-label {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: var(--size-4-2);
+}
+
+/* As tall as one line of the text: the icon sits on the first line when the text wraps */
+.rock-sync-bar-icon {
+  display: flex;
+  align-items: center;
+  height: 1.5em;
+}
+
+.rock-sync-bar-actions {
+  display: flex;
+  gap: var(--size-4-2);
+}
+
+/* Notice with an action (auto-push after a resolved conflict: Undo) */
+.rock-sync-notice-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-3);
+}
+
+.rock-sync-notice-row button {
+  flex-shrink: 0;
+}
+
+/* Sync status icon (next to the vault name, or in the ribbon): synced green, syncing / offline muted, error red */
+body {
+  --rock-sync-status-synced: var(--color-green);
+  --rock-sync-status-error: var(--color-red);
+}
+
+.rock-sync-status.rock-sync-status-synced {
+  color: var(--rock-sync-status-synced);
+}
+
+.rock-sync-status.rock-sync-status-syncing,
+.rock-sync-status.rock-sync-status-offline {
+  color: var(--text-muted);
+}
+
+.rock-sync-status.rock-sync-status-error {
+  color: var(--rock-sync-status-error);
+}
+
+/* Settings: the status card on top, the connection */
+.rock-sync-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-4-3);
+  padding: var(--size-4-3) var(--size-4-4);
+  margin-bottom: var(--size-4-4);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.rock-sync-status-card-error {
+  border-color: var(--rock-sync-status-error);
+}
+
+.rock-sync-status-card-icon {
+  display: flex;
+  padding-top: 2px;
+}
+
+.rock-sync-status-card-icon .svg-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.rock-sync-status-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.rock-sync-status-card-title {
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+}
+
+.rock-sync-status-card-meta {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.rock-sync-status-card-problem {
+  margin-top: var(--size-4-1);
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
+.rock-sync-status-card > button {
+  flex-shrink: 0;
+}
+
+.rock-sync-connection-value {
+  color: var(--text-muted);
+  user-select: text;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.setting-item-description.rock-sync-check-error {
+  color: var(--text-error);
+}
+
+.rock-sync-hidden {
+  display: none !important;
+}

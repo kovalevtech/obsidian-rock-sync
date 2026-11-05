@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  # make patch / minor / major on a machine
+  push:
+    tags: ['*']
+  # The same from here: Actions tab → Release → Run workflow
+  workflow_dispatch:
+    inputs:
+      level:
+        description: Version to bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+defaults:
+  run:
+    working-directory: plugin
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          working-directory: backend
+          bundler-cache: true
+
+      - run: make deps test
+
+  # What this token pushes starts no workflow, so the tag doesn't either: the release below is this run's
+  bump:
+    needs: test
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      ref: ${{ steps.bump.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - id: bump
+        run: make ci-bump
+        env:
+          LEVEL: ${{ inputs.level }}
+
+  # A job of its own: installed gems must not land in the image's build context
+  image:
+    needs: [test, bump]
+    # bump is skipped on a tag push, which would skip this too
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.bump.result != 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.ref || github.ref }}
+
+      - run: make release-image
+        env:
+          GHCR_USER: ${{ github.repository_owner }}
+          GHCR_TOKEN: ${{ github.token }}
+
+  # After the image: no plugin out before its server, and a failed image is re-run alone
+  plugin:
+    needs: [bump, image]
+    if: ${{ !cancelled() && needs.image.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump.outputs.ref || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - run: make deps release-plugin
+        env:
+          GH_TOKEN: ${{ github.token }}

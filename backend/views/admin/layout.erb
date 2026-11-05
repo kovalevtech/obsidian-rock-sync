@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>vault-sync admin</title>
+<link rel="stylesheet" href="<%= stylesheet %>">
+</head>
+<body>
+<% if signed_in? %>
+  <header class="appbar">
+    <%= icon(:cloud) %>
+    <span class="title"><%= h @title %></span>
+    <form class="inline" method="post" action="<%= path('/logout') %>"><%= csrf_field %><button class="btn plain"><%= icon(:logout) %>Log out</button></form>
+  </header>
+  <div class="layout">
+    <nav class="sidebar">
+      <a href="<%= path('/vaults') %>" class="<%= 'active' if page?('/vaults') %>"><%= icon(:folder) %>Vaults</a>
+      <a href="<%= path('/tokens') %>" class="<%= 'active' if request.path_info.start_with?('/tokens') || page?('/connect') %>"><%= icon(:key) %>Device tokens</a>
+      <% if Config.mcp_enabled? %><a href="<%= path('/scoped') %>" class="<%= 'active' if request.path_info.start_with?('/scoped') %>"><%= icon(:extension) %>Scoped tokens</a><% end %>
+    </nav>
+    <main class="content"><%= yield %></main>
+  </div>
+<% else %>
+  <main class="login"><%= yield %></main>
+<% end %>
+</body>
+</html>

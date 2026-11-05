@@ -1,0 +1,45 @@
+<% @title = 'Scoped tokens' %>
+<% show_revoked = params['revoked'] == '1' %>
+<% all = Devices.list(kind: 'scoped') %>
+<% tokens = show_revoked ? all : all.reject { _1[:revoked_at] } %>
+<section class="paper">
+  <div class="paper-head">
+    <h2>Scoped tokens</h2>
+    <form class="inline" method="get" action="<%= path('/scoped') %>">
+      <label class="check"><input type="checkbox" name="revoked" value="1"<%= ' checked' if show_revoked %> onchange="this.form.submit()">Show revoked</label>
+    </form>
+    <a class="btn contained" href="<%= path('/scoped/new') %>"><%= icon(:add) %>New token</a>
+  </div>
+  <% if tokens.empty? %>
+    <div class="paper-body muted"><%= all.empty? ? 'None yet.' : 'No active tokens.' %></div>
+  <% else %>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Name</th><th>Grants</th><th>Created</th><th>Last used</th><th>Status</th></tr></thead>
+        <tbody>
+          <% tokens.each do |token| %>
+            <% grants = Grants.of(token[:id]).map { _1.to_h.except(:id) } %>
+            <%# Grants that wouldn't pass a save any more: adding nothing (renamed folders), none at all %>
+            <% check = !token[:revoked_at] && Grants.check(grants).any? %>
+            <tr class="link<%= ' revoked' if token[:revoked_at] %>">
+              <td><a href="<%= path("/scoped/#{token[:id]}") %>"><%= h token[:name] %></a></td>
+              <td>
+                <% if grants.any? %><%= h grant_label(grants.first) %><% if grants.size > 1 %> <span class="muted">+<%= grants.size - 1 %></span><% end %><% else %><span class="muted">—</span><% end %>
+                <% if check %> <span class="chip warn">check grants</span><% end %>
+              </td>
+              <td class="muted"><%= time(token[:created_at]) %></td>
+              <td class="muted"><%= time(token[:last_seen_at]) || '—' %></td>
+              <td>
+                <% if token[:revoked_at] %>
+                  <span class="chip">Revoked <%= time(token[:revoked_at]) %></span>
+                <% else %>
+                  <span class="chip active">Active</span>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>

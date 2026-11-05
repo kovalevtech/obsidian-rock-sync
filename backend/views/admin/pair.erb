@@ -1,0 +1,18 @@
+<% @title = 'Device tokens' %>
+<section class="paper" style="max-width: 720px">
+  <div class="paper-head"><h2><%= @reconnect ? "Reconnect #{h @reconnect[:name]}" : 'Connect a device' %></h2></div>
+  <div class="paper-body">
+    <p>Vault: <strong><%= h @vault %></strong></p>
+    <p class="muted">In Obsidian on the device: Rock Sync's settings, the link into Server URL (or the server URL and the code, each in its field), then Connect. It works once, until <%= time(@expires_at) %>.<% if @reconnect %> The device keeps the name <%= h @reconnect[:name] %>; once the code is used, its old token stops working.<% end %></p>
+    <% link = "#{Config.public_url}?code=#{@code}" %>
+    <p class="muted">Connection link</p>
+    <%= copyable(link) %>
+    <p class="muted">Server URL</p>
+    <%= copyable(Config.public_url) %>
+    <p class="muted">Code</p>
+    <%= copyable(@code, @code.dup.insert(3, ' ')) %>
+    <div class="row">
+      <a class="btn" href="<%= path('/tokens') %>">Done</a>
+    </div>
+  </div>
+</section>

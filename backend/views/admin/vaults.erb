@@ -1,0 +1,63 @@
+<% @title = 'Vaults' %>
+<div class="page">
+  <section class="paper">
+    <div class="paper-head"><h2>Vaults</h2></div>
+    <% vaults = Vault.names %>
+    <% if vaults.any? %>
+      <% tokens = Devices.list.reject { _1[:revoked_at] } %>
+      <div class="scroll"><table>
+        <thead><tr><th>Name</th><th class="num">Files</th><th class="num">History</th><th class="num">Total</th><th>Device tokens</th><th>Objects</th><th></th></tr></thead>
+        <tbody>
+          <% vaults.each do |name| %>
+            <% vault = Vault.find(name) %>
+            <% sizes = vault&.sizes %>
+            <% last = vault&.compaction %>
+            <tr>
+              <td><%= h name %></td>
+              <% %i[files history total].each do |key| %>
+                <td class="num<%= ' muted' unless key == :total %>"><%= sizes ? bytes(sizes[key]) : '—' %></td>
+              <% end %>
+              <% names = tokens.select { _1[:vault] == name }.map { _1[:name] } %>
+              <td class="muted lines"><%= names.empty? ? '—' : names.map { h _1 }.join('<br>') %></td>
+              <td class="lines">
+                <% if vault %>
+                  <% objects = vault.git.count_objects %>
+                  <div class="muted nowrap"><%= objects[:loose] %> loose</div>
+                  <div class="muted nowrap"><%= objects[:packs] %> <%= objects[:packs] == 1 ? 'pack' : 'packs' %></div>
+                  <% if vault.compacting? %>
+                    <div class="nowrap">Compacting… since <%= last[:started_at].utc.strftime('%H:%M UTC') %></div>
+                  <% elsif last&.dig(:error) %>
+                    <div class="error">Compact failed: <%= h last[:error] %></div>
+                  <% elsif last %>
+                    <div class="muted nowrap">history <%= bytes(last[:before]) %> → <%= bytes(last[:after]) %> · <%= time(last[:finished_at]) %></div>
+                  <% end %>
+                <% end %>
+              </td>
+              <td class="actions">
+                <a class="btn small" href="<%= path("/connect?vault=#{Rack::Utils.escape(name)}") %>">Connect device</a>
+                <% if vault && !vault.compacting? %>
+                  <form class="inline" method="post" action="<%= path("/vaults/#{name}/compact") %>">
+                    <%= csrf_field %><button class="btn small">Compact</button>
+                  </form>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table></div>
+    <% else %>
+      <div class="paper-body muted">None yet.</div>
+    <% end %>
+  </section>
+
+  <section class="paper">
+    <div class="paper-head"><h2>New vault</h2></div>
+    <form class="paper-body" method="post" action="<%= path('/vaults') %>">
+      <%= csrf_field %>
+      <label class="field"><input name="name" placeholder=" " pattern="[a-z0-9\-]{1,64}" required value="<%= h(params['name']) if @vault_error %>"><span>Name</span></label>
+      <p class="muted hint">Lowercase letters, digits and dashes. Creates an empty repository on the server.</p>
+      <button class="btn contained"><%= icon(:add) %>Create vault</button>
+      <% if @vault_error %><p class="error"><%= h @vault_error %></p><% end %>
+    </form>
+  </section>
+</div>

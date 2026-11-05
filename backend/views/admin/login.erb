@@ -1,0 +1,10 @@
+<form class="paper" method="post" action="<%= path('/login') %>">
+  <%= csrf_field %>
+  <div class="avatar"><%= icon(:cloud) %></div>
+  <h1>vault-sync</h1>
+  <label class="field"><input name="user" placeholder=" " autocomplete="username" required autofocus><span>User</span></label>
+  <label class="field"><input name="password" type="password" placeholder=" " autocomplete="current-password" required><span>Password</span></label>
+  <% if settings.gate.totp? %><label class="field"><input name="code" placeholder=" " inputmode="numeric" autocomplete="one-time-code" required><span>Code</span></label><% end %>
+  <button class="btn contained">Log in</button>
+  <% if @error %><p class="error"><%= h @error %></p><% end %>
+</form>

@@ -1,0 +1,25 @@
+<% @title = 'Device tokens' %>
+<% vaults = Vault.names %>
+<% chosen = params['vault'].to_s %>
+<section class="paper" style="max-width: 720px">
+  <div class="paper-head"><h2>Connect a device</h2></div>
+  <% if vaults.empty? %>
+    <div class="paper-body muted">Create a vault first.</div>
+  <% else %>
+    <form class="paper-body" method="post" action="<%= path('/connect') %>">
+      <%= csrf_field %>
+      <p class="muted hint">A one-time code to type into the plugin on the device: it connects that vault, the device names itself and gets its own token.</p>
+      <select name="vault" required aria-label="Vault">
+        <% unless vaults.include?(chosen) %><option value="" selected disabled>Vault</option><% end %>
+        <% vaults.each do |name| %>
+          <option value="<%= h name %>"<%= ' selected' if name == chosen %>><%= h name %></option>
+        <% end %>
+      </select>
+      <div class="row" style="margin-top: 16px">
+        <button class="btn contained"><%= icon(:add) %>Get a code</button>
+        <a class="btn" href="<%= path('/tokens') %>">Cancel</a>
+      </div>
+      <% if @connect_error %><p class="error"><%= h @connect_error %></p><% end %>
+    </form>
+  <% end %>
+</section>

@@ -1,0 +1,11 @@
+{
+  "id": "rock-sync",
+  "name": "Rock Sync",
+  "version": "1.0.0",
+  "minAppVersion": "1.8.7",
+  "description": "Sync your vault through your own server, with full git history, conflict-aware merges and optional MCP access for AI agents.",
+  "author": "Tim Kovalev",
+  "authorUrl": "https://github.com/kovalevtech",
+  "fundingUrl": "https://github.com/sponsors/kovalevtech",
+  "isDesktopOnly": false
+}
