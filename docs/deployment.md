@@ -89,7 +89,7 @@ Any proxy works, provided that:
 |---|---|
 | Terminate HTTPS and send `X-Forwarded-Proto: https` | Without it [the admin login fails](admin.md#turning-it-on) |
 | Hold requests for over 60 seconds | Long polls wait up to 60 s (the plugin asks for 25). If they get cut short, the plugin treats it as a failure and backs off |
-| Accept bodies up to `MAX_FILE_SIZE` | 100 MB by default; a lower limit makes big files fail with a proxy's error |
+| Accept bodies up to `MAX_FILE_SIZE` | 100 MB by default; a lower limit makes big files fail with a proxy's error. The server takes in a body of up to that size before it answers `401` to a request without a token, so a public proxy's own body limit is the place to stop strangers' uploads early |
 | Pass `Authorization`, `ETag`, `If-Match`, `If-None-Match`, `Destination` untouched | The sync protocol depends on them |
 
 [Caddy](https://caddyserver.com) does all of this by default. Everything on a private address, with `/mcp` alone on a public one, and the admin panel only on the private one, from its own container:

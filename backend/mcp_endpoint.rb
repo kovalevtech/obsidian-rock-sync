@@ -11,6 +11,12 @@ class McpEndpoint < Sinatra::Base
   # Its own auth (the header): no browser session to protect, and claude.ai's requests may name another Origin
   set :protection, except: :http_origin
 
+  # Sinatra parses a form body into params before any filter, the token's included: here none is, ever (FormBody)
+  def call!(env)
+    FormBody.ignore(env)
+    super
+  end
+
   # /mcp only (anything below it is the 404 of any unknown path), then the token, then POST only: no SSE stream to
   # open (GET), no session to end (DELETE). Why a token failed stays unsaid, in the log too
   before do
@@ -26,6 +32,7 @@ class McpEndpoint < Sinatra::Base
     @token = McpTools::Token.new(id: token.id, name: token.name, grants: Grants.of(token.id))
     halt 405, { 'allow' => 'POST' }, '' unless request.post?
     halt 413 if request.content_length.to_i > Config.max_file_size
+    halt 415 if FormBody.sent?(request)
   end
 
   # JSON-RPC: initialize, notifications/initialized, tools/list, tools/call. A notification has no answer: 202

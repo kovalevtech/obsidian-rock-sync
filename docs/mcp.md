@@ -119,6 +119,7 @@ Hitting a limit gives a tool error with a message Claude can act on, such as wri
 | `405` + `Allow: POST` | Any method but `POST` |
 | `404` | Any path below `/mcp` |
 | `413` | Body over `MAX_FILE_SIZE` |
+| `415` | A form or multipart body (`application/x-www-form-urlencoded`, `multipart/*`): never read |
 
 To try it by hand:
 

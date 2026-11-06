@@ -201,7 +201,6 @@ class PairingTest < VaultTest
     code = issue
     res = nil
     out, = capture_io do
-      config_ru = Rack::Builder.parse_file(File.expand_path('../config.ru', __dir__))
       res = Rack::MockRequest.new(config_ru).post('/pair', input: JSON.generate(code:, name: 'pixel'), 'CONTENT_TYPE' => 'application/json')
     end
     assert_equal 200, res.status

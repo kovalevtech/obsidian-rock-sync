@@ -21,20 +21,27 @@ rescue StandardError => e
   abort "vault-sync: not starting: #{e.message}"
 end
 
-# Never logs Authorization (it carries the token: Basic for the sync API, Bearer for MCP), cookies (the admin session),
-# request bodies (file contents, the admin's password and forms, MCP tool arguments, pairing codes — only the query
-# string), MCP answers (read_file's content) or /pair's (a new token): who the request was for comes from App /
+# For debugging, not for production. Never logs credentials in headers (Authorization: the token, Basic for the sync
+# API, Bearer for MCP; cookies: the admin session; a proxy's: Proxy-Authorization, Cloudflare Access' service token and
+# JWT; anything named like a secret), request bodies (file contents, the admin's password and forms, MCP tool
+# arguments, pairing codes — only the query string) or answers, but for the routes in LOGGED_BODIES: no file content
+# (/files, /merge, a manifest's paths, MCP's read_file), no new token (/pair). Who the request was for comes from App /
 # McpEndpoint (env['vault_sync.auth'] — device name + vault, the scoped token's name, or that it was refused)
 class LogRequestAndResponse
-  SECRET_HEADERS = %w[HTTP_AUTHORIZATION HTTP_COOKIE].freeze
-  QUIET_BODIES = %r{\A/(mcp(/|\z)|pair\z)}
+  SECRET_HEADERS = %w[
+    HTTP_AUTHORIZATION HTTP_PROXY_AUTHORIZATION HTTP_COOKIE
+    HTTP_CF_ACCESS_CLIENT_ID HTTP_CF_ACCESS_CLIENT_SECRET HTTP_CF_ACCESS_JWT_ASSERTION
+  ].freeze
+  SECRET_NAMES = /AUTH|TOKEN|SECRET|PASSWORD|PASSWD|COOKIE|SESSION|JWT|API_?KEY|SIGNATURE|CREDENTIAL/
+  # Answers whose JSON carries neither vault content nor a secret
+  LOGGED_BODIES = %w[/vaults].freeze
 
   def initialize(app); @app = app; end
   def call(env)
     return @app.call(env) if env['PATH_INFO'] == '/health' # Docker's healthcheck, every 30 s
     req = Rack::Request.new(env)
 
-    headers = Hash[*env.select {|k,v| k.start_with?('HTTP_') && !SECRET_HEADERS.include?(k) }
+    headers = Hash[*env.select {|k,v| k.start_with?('HTTP_') && !SECRET_HEADERS.include?(k) && !SECRET_NAMES.match?(k) }
 		  .collect {|k,v| [k.sub(/^HTTP_/, ''), v]}
 		  .collect {|k,v| [k.split('_').collect(&:capitalize).join('-'), v]}
 		  .sort
@@ -43,7 +50,7 @@ class LogRequestAndResponse
     puts "<-- #{req.request_method} #{req.url} #{req.GET.inspect} #{headers.inspect}"
     status, headers, body = @app.call(env)
 
-    shown = QUIET_BODIES.match?(req.path) ? '- stripped -' : (JSON.load(body.first) rescue '- stripped -')
+    shown = LOGGED_BODIES.include?(req.path) ? (JSON.parse(body.first) rescue '- stripped -') : '- stripped -'
     puts "--> #{status} #{env['vault_sync.auth']} #{shown.inspect} #{headers.except('set-cookie').inspect}"
     [status, headers, body]
   end

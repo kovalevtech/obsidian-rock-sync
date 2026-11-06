@@ -35,9 +35,11 @@ class AuthTest < VaultTest
   # Routes naming a vault: App::DEVICE_ONLY ones ignore the vault part
   def vault_routes = routes.reject { |_, path| App::DEVICE_ONLY.include?(path) }
 
+  # A body with the plugin's content type (rack-test's default would be a form: 415)
   def call(verb, path, authorization, env = {})
     env = env.merge('HTTP_AUTHORIZATION' => authorization) if authorization
-    custom_request(verb, path, "x\n", { 'HTTP_DESTINATION' => 'b.md' }.merge(env))
+    custom_request(verb, path, "x\n", { 'HTTP_DESTINATION' => 'b.md', 'CONTENT_TYPE' => 'application/octet-stream',
+                                        **env })
     last_response
   end
 
@@ -75,10 +77,14 @@ class AuthTest < VaultTest
     end
     vault_routes.each do |verb, path|
       wrong_vault.each { |why, header| assert_unauthorized(call(verb, path, header), "#{verb} #{path}: #{why}") }
+    end
+    # DEVICE_ONLY routes included: they ignore Basic's vault part, not the header
+    routes.each do |verb, path|
       res = call(verb, path, basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => 'other')
       assert_unauthorized(res, "#{verb} #{path}: vault header mismatch")
     end
     assert_equal 0, commit_count
+    assert Devices.authenticate(@token).first, 'DELETE /token refused'
   end
 
   # A method no route has, on a path that has routes: the same 401 without a token
@@ -115,12 +121,34 @@ class AuthTest < VaultTest
     assert_equal 200, call('GET', '/manifest', basic('test', @token)).status
   end
 
-  # DEVICE_ONLY routes ignore the header, like Basic's vault part
-  def test_vaults_ignores_the_vault_header
-    [nil, '', 'test', 'other', 'missing'].each do |header|
+  # DEVICE_ONLY routes ignore Basic's vault part, but the header, when sent, must be the token's vault: else a proxy
+  # letting one vault through would let any token in to confirm itself (/vaults, with a vault name) or revoke itself
+  def test_vaults_and_the_vault_header
+    [nil, 'test'].each do |header|
       env = header ? { 'HTTP_X_ROCK_SYNC_VAULT' => header } : {}
-      assert_equal 200, call('GET', '/vaults', basic('', @token), env).status, header.inspect
+      ['', 'test', 'other'].each do |vault|
+        res = call('GET', '/vaults', basic(vault, @token), env)
+        assert_equal [200, { 'vaults' => ['test'] }], [res.status, JSON.parse(res.body)], [header, vault].inspect
+      end
     end
+    ['', 'other', 'missing', 'TEST', 'test '].each do |header|
+      res = call('GET', '/vaults', basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => header)
+      assert_unauthorized(res, header.inspect)
+      assert_equal 'unauthorized: vault header mismatch', last_request.env['vault_sync.auth']
+    end
+  end
+
+  def test_token_and_the_vault_header
+    ['', 'other', 'missing'].each do |header|
+      assert_unauthorized(call('DELETE', '/token', basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => header), header)
+      assert_equal 'unauthorized: vault header mismatch', last_request.env['vault_sync.auth']
+    end
+    assert Devices.authenticate(@token).first
+
+    assert_equal 204, call('DELETE', '/token', basic('', @token), 'HTTP_X_ROCK_SYNC_VAULT' => 'test').status
+    assert_equal :revoked, Devices.authenticate(@token).last
+    assert_equal 204, call('DELETE', '/token', basic('', @other_token)).status # no header: as before
+    assert_equal :revoked, Devices.authenticate(@other_token).last
   end
 
   # The token's own vaults, whatever the vault part says; never another token's
@@ -175,6 +203,75 @@ class AuthTest < VaultTest
     ENV.delete('MAX_FILE_SIZE')
   end
 
+  # Over Rack's params limit (4096): parsed, it was a 500 (QueryLimitError) before auth
+  FORM = 'a=1&' * 5000
+  MULTIPART = "--x\r\nContent-Disposition: form-data; name=\"f\"; filename=\"f.md\"\r\n\r\nform\r\n--x--\r\n"
+  FORMS = {
+    'form' => ['application/x-www-form-urlencoded', FORM],
+    'multipart' => ['multipart/form-data; boundary=x', MULTIPART],
+    'other multipart' => ['multipart/mixed; boundary=x', MULTIPART],
+    'form, upper case' => ['Application/X-WWW-Form-Urlencoded; charset=utf-8', FORM]
+  }.freeze
+
+  # A form body: with its Content-Length, or chunked (an input without a size: no Content-Length, as before Puma
+  # de-chunks it)
+  def form_env(type, body, chunked:)
+    return { 'CONTENT_TYPE' => type, input: body } unless chunked
+
+    reader, writer = IO.pipe
+    writer.write(body)
+    writer.close
+    { 'CONTENT_TYPE' => type, 'HTTP_TRANSFER_ENCODING' => 'chunked', input: reader }
+  end
+
+  # Neither the query parser nor the multipart one ran; the body wasn't read
+  def assert_unparsed(what)
+    env = last_request.env
+    assert_equal [[], nil], [env['rack.request.form_pairs'], env['rack.request.form_vars']], "#{what}: parsed"
+    assert_equal 0, env['rack.input'].pos, "#{what}: read" if env['rack.input'].is_a?(StringIO)
+  end
+
+  # Form and multipart bodies are never parsed: without a token the usual 401, with one 415; nothing written
+  def test_form_bodies_are_refused_unparsed
+    routes = [%w[PUT /files/a.md], %w[POST /merge/a.md], %w[POST /move/a.md], %w[DELETE /files/a.md], %w[GET /manifest]]
+    FORMS.each do |what, (type, body)|
+      [false, true].each do |chunked|
+        how = "#{what}#{', chunked' if chunked}"
+        routes.each do |verb, path|
+          [nil, 'Bearer x', basic('test', 'x' * 43), basic('test', @revoked_token)].each do |header|
+            res = call(verb, path, header, form_env(type, body, chunked:))
+            assert_unauthorized(res, "#{verb} #{path}: #{how}, #{header.inspect}")
+            assert_unparsed("#{verb} #{path}: #{how}")
+          end
+          assert_equal 415, call(verb, path, basic('test', @token), form_env(type, body, chunked:)).status,
+                       "#{verb} #{path}: #{how}"
+          assert_unparsed("#{verb} #{path}: #{how}")
+        end
+        # No credentials there: refused right away
+        assert_equal 415, call('POST', '/pair', nil, form_env(type, body, chunked:)).status, "/pair: #{how}"
+        assert_unparsed("/pair: #{how}")
+      end
+    end
+    assert_equal 0, commit_count
+    assert_empty Dir.children(@vault.tree)
+  end
+
+  # A form type on a request without a body (rack-test's default; maybe some HTTP stacks') changes nothing
+  def test_a_form_type_without_a_body_passes
+    form = { 'CONTENT_TYPE' => 'application/x-www-form-urlencoded', input: '' }
+    assert_equal 204, call('PUT', '/files/a.md', basic('test', @token)).status
+    assert_equal 204, call('POST', '/move/a.md', basic('test', @token), form).status
+    assert_equal 204, call('DELETE', '/files/b.md', basic('test', @token), 'HTTP_IF_MATCH' => blob("x\n"), **form).status
+    assert_equal 204, call('DELETE', '/token', basic('', @token), form).status
+  end
+
+  # Without a content type a POST body counts as a form for Rack: not parsed either, the route reads it
+  def test_a_post_without_a_content_type_is_not_parsed
+    call('POST', '/pair', nil, 'CONTENT_TYPE' => nil, input: FORM)
+    assert_equal 400, last_response.status # the route read it as JSON
+    assert_equal [[], nil], [last_request.env['rack.request.form_pairs'], last_request.env['rack.request.form_vars']]
+  end
+
   def test_a_token_never_reaches_another_vault
     WriteFile.call(@other, 'a.md', "b's\n", if_none_match: '*')
     head = @other.version
@@ -199,7 +296,7 @@ class AuthTest < VaultTest
   end
 
   def test_commit_author_and_client_trailer
-    put '/files/a.md', "a\n", 'HTTP_AUTHORIZATION' => basic('test', @token),
+    put '/files/a.md', "a\n", 'CONTENT_TYPE' => 'text/markdown', 'HTTP_AUTHORIZATION' => basic('test', @token),
                               'HTTP_X_ROCK_SYNC_CLIENT' => 'plugin=1.2.0; obsidian=1.11.4; platform=android'
     assert_equal 204, last_response.status
     assert_equal "test-device <test-device@device>\nsync <sync@localhost>\n" \
@@ -208,19 +305,19 @@ class AuthTest < VaultTest
   end
 
   def test_client_header_is_one_printable_line_at_most_200_chars
-    put '/files/a.md', "a\n", 'HTTP_AUTHORIZATION' => basic('test', @token),
+    put '/files/a.md', "a\n", 'CONTENT_TYPE' => 'text/markdown', 'HTTP_AUTHORIZATION' => basic('test', @token),
                               'HTTP_X_ROCK_SYNC_CLIENT' => "plugin=1\r\nSigned-off-by: x\tё#{'y' * 300}"
     body = git('log', '-1', '--format=%B').chomp.chomp
     assert_equal "PUT a.md\n\nClient: #{"plugin=1Signed-off-by: x#{'y' * 300}"[0, 200]}", body
   end
 
   def test_no_trailer_without_client_header
-    put '/files/a.md', "a\n", 'HTTP_AUTHORIZATION' => basic('test', @token)
+    put '/files/a.md', "a\n", 'CONTENT_TYPE' => 'text/markdown', 'HTTP_AUTHORIZATION' => basic('test', @token)
     assert_equal "PUT a.md\n", git('log', '-1', '--format=%B').sub(/\n+\z/, "\n")
   end
 
   def test_long_poll_ignores_commits_in_other_vaults
-    put '/files/a.md', "a\n", 'HTTP_AUTHORIZATION' => basic('test', @token)
+    put '/files/a.md', "a\n", 'CONTENT_TYPE' => 'text/markdown', 'HTTP_AUTHORIZATION' => basic('test', @token)
     etag = (get '/manifest', {}, 'HTTP_AUTHORIZATION' => basic('test', @token))['ETag']
     poller = Thread.new do
       session = Rack::Test::Session.new(App)

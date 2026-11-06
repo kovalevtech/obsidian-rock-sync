@@ -34,7 +34,7 @@ For more devices and vaults, use the [admin panel](admin.md). There are no comma
 | `MAX_FILE_SIZE` | `104857600` | Largest request body in bytes (100 MB) |
 | `MCP_MAX_WRITE` | `1048576` | The most one MCP call may write or read, in bytes (1 MB) |
 | `MCP_BASE_URL` | | The origin Claude reaches the server at, for a new token's MCP URL in the admin panel. Empty: `PUBLIC_URL` |
-| `VERBOSE_HTTP_LOGS` | off | `true` or `1`: a log line for every request and answer, including why a request was refused |
+| `VERBOSE_HTTP_LOGS` | off | `true` or `1`: a log line for every request and answer, including why a request was refused. For debugging, not for production: it logs paths and most headers |
 | `INIT_VAULT_NAME`, `INIT_VAULT_CODE` | | [First run](#first-run) |
 | `PUBLIC_URL`, `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, optionally `ADMIN_TOTP_SECRET` | | [Admin panel](admin.md#turning-it-on) |
 

@@ -24,7 +24,7 @@ There is no `WWW-Authenticate` header, because a browser would pop up a login di
 
 An optional `X-Rock-Sync-Client: plugin=1.0.0; obsidian=1.8.7; platform=macos` header ends up in the commit's `Client:` trailer (printable ASCII, at most 200 characters).
 
-The plugin also sends `X-Rock-Sync-Vault: <vault>`, the vault in the clear, whenever it has one. A proxy in front can't read Basic, but it can let through only some vaults' requests by this header. The header is optional. When it is there, it must equal Basic's vault exactly, else the request gets the same 401. `/vaults` and `/token` ignore it, as they ignore Basic's vault part. On its own it protects nothing, since the client sets it. Combined with a proxy rule, another device's leaked token can't reach any vault from outside except the ones the rule allows.
+The plugin also sends `X-Rock-Sync-Vault: <vault>`, the vault in the clear, whenever it has one. A proxy in front can't read Basic, but it can let through only some vaults' requests by this header. The header is optional. When it is there, it must equal Basic's vault exactly, else the request gets the same 401. `/vaults` and `/token` ignore Basic's vault part, but not the header: there it must equal the token's own vault. On its own it protects nothing, since the client sets it. Combined with a proxy rule, another device's leaked token can't reach any vault from outside except the ones the rule allows.
 
 ## Versions
 
@@ -39,6 +39,8 @@ File versions travel in an unquoted `ETag`. `Last-Modified` is the time of the l
 A path a vault may not hold gets `400` on every route that takes one, `Destination` included, before anything is read or written: a hidden segment (starting with a dot) other than a folder's `.keep`, an empty, `.` or `..` segment, a control character, a backslash, a leading `~`, a `git~1` segment, a segment over 255 bytes or a path over 1024. The full rule is in [Storage](storage.md#paths).
 
 Every answer has `Cache-Control: no-store`. If your HTTP client keeps its own cache, turn it off or send `Cache-Control: no-cache`: a cached answer looks like an up-to-date file.
+
+Bodies are never form data. A request with a body sent as `application/x-www-form-urlencoded` or `multipart/*` gets `415`, after the credentials are checked (without them it's the usual `401`); the body isn't read. `curl -d` and `--data-binary` send the former by default, so name the type: `-H 'Content-Type: application/octet-stream'`. A form type on a request without a body, such as a `DELETE`, is fine.
 
 ## Endpoints
 
@@ -89,11 +91,11 @@ Spaces in the code don't matter. 5 wrong codes in a row cancel all active ones.
 {"vaults": ["notes"]}
 ```
 
-The token's vault (one; a list for plugins from before connection codes). Only the token matters here: the vault part of Basic is ignored and may be empty (`-u ':<token>'`).
+The token's vault (one; a list for plugins from before connection codes). Only the token matters here: the vault part of Basic is ignored and may be empty (`-u ':<token>'`). An `X-Rock-Sync-Vault` header, if sent, must be the token's vault.
 
 ### `DELETE /token`
 
-Revokes the token it's sent with: the plugin's **Remove**, or a vault connected elsewhere. `204`; the vault part of Basic is ignored.
+Revokes the token it's sent with: the plugin's **Remove**, or a vault connected elsewhere. `204`; the vault part of Basic is ignored, an `X-Rock-Sync-Vault` header must be the token's vault. The plugin sends the vault it revokes the token for, so a proxy that filters by the header lets the revoke through.
 
 ### `GET /manifest?v=1`
 
@@ -106,7 +108,7 @@ Revokes the token it's sent with: the plugin's **Remove**, or a vault connected 
 
 `version` is the vault's HEAD commit, `null` until the first commit. Each file is `[hash, size in bytes]`. Without `v=1` each file is just its hash, for old clients. The response has a quoted `ETag`, an empty vault's too, and answers `304` to a matching `If-None-Match`; send the header back exactly as you received it.
 
-**Long polling:** `GET /manifest?v=1&wait=25` with `If-None-Match: <etag>` holds the request until the vault changes (`200` + manifest) or the time is up (`304`). `wait` is capped at 60 seconds. Without `If-None-Match` it answers right away. Each waiting client holds one server thread.
+**Long polling:** `GET /manifest?v=1&wait=25` with `If-None-Match: <etag>` holds the request until the vault changes (`200` + manifest) or the time is up (`304`). `wait` is capped at 60 seconds. Without `If-None-Match` it answers right away. Each waiting request holds one server thread, even after its client has gone, until it answers. So at most 2 polls of a token wait at a time, and at most 12 of all tokens together (4 below the server's 16 threads, which stay free for everything else). A poll over either limit gets `429 {"error":"too many polls"}` with `Retry-After: 5` at once: wait, then poll again. The plugin backs off 5 seconds, doubling up to a minute, as after any failed poll. A poll that waited answers `401` if its token was revoked or replaced meanwhile.
 
 ### `GET /files/<path>`
 

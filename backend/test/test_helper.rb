@@ -65,6 +65,16 @@ class VaultTest < Minitest::Test
     blob(content)
   end
 
+  # config.ru as the server runs it (its boot part's lines swallowed), parsed once: parsed again, it would redefine its
+  # classes' constants (warnings)
+  def config_ru
+    $config_ru ||= begin
+      app = nil
+      capture_io { app = Rack::Builder.parse_file(File.expand_path('../config.ru', __dir__)) }
+      app
+    end
+  end
+
   def last_commit_message
     git('log', '-1', '--format=%s').chomp
   end

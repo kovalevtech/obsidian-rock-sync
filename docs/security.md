@@ -36,6 +36,8 @@ The [admin panel](admin.md#device-tokens) issues a one-time, 6-digit code for a 
 
 Logs never contain the `Authorization` header, cookies, request bodies, MCP answers or `POST /pair` answers, and neither tokens nor connection codes are logged at any point. They do contain paths, device and token names, and the vault's name, so treat file names in your logs as private.
 
+With `VERBOSE_HTTP_LOGS` on there's a line for each request and answer, with the request's headers but none that carries credentials (`Authorization`, `Proxy-Authorization`, cookies, Cloudflare Access' `Cf-Access-Client-Id`, `Cf-Access-Client-Secret` and `Cf-Access-Jwt-Assertion`, and any named like a token, key or secret). Answers are logged only where they hold neither file content nor a secret (`GET /vaults`); for everything else only the status. It's meant for debugging, not for production.
+
 ## Transport
 
 The server speaks plain HTTP and expects a proxy or a private network in front of it. Tokens and notes travel in the clear otherwise. See [Deployment](deployment.md#network).

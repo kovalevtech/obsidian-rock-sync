@@ -23,3 +23,11 @@ The server now checks every path against one rule ([Storage](storage.md#paths)) 
 - **The plugin isn't affected:** it never syncs hidden paths. A note whose name the rule refuses for another reason (it starts with `~`, say) stays on its device with a grey dot ("Not synced: the last upload failed") and a sync error. Rename it to sync it.
 - **Git no longer looks at the vault's files.** A `.gitignore`, `.gitattributes` or nested `.git` folder inside a vault can't change what's stored or block writes any more, and a failed write leaves the vault as it was.
 - **Check the log after updating.** A vault that already holds refused paths is named at startup, with how to clean it up in [Storage](storage.md#cleaning-up-refused-paths). Nothing is deleted on its own.
+
+### Long polls, form bodies, the vault header, logs
+
+- **Long polls are capped:** at most 2 waiting polls per token and 12 per server process. One over gets `429` with `Retry-After: 5` at once; the plugin backs off as after any failed poll. A poll whose token was revoked while it waited gets `401` instead of the manifest ([API](api.md)).
+- **Form bodies get `415`:** the sync API and MCP never read `application/x-www-form-urlencoded` or `multipart/*` bodies. Without credentials such a request gets the usual `401`. A script using curl's `-d` / `--data-binary` needs `-H 'Content-Type: application/octet-stream'` (or `text/markdown`).
+- **`X-Rock-Sync-Vault` on every route:** `GET /vaults` and `DELETE /token` now refuse the header too when it isn't the token's vault (`401`, as elsewhere). The plugin sends it with `DELETE /token`, so a proxy allowing one vault lets its Remove through.
+- **Verbose logs carry less:** with `VERBOSE_HTTP_LOGS` on, credential-like headers (`Proxy-Authorization`, Cloudflare Access headers, anything named like a token, key or secret) and answer bodies (file content, manifests) are left out. It's for debugging, not for production.
+- **rack 3.2.8, sqlite3 2.10.2**, for their security advisories.
