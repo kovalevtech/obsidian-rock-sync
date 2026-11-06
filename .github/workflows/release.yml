@@ -84,7 +84,9 @@ jobs:
     if: ${{ !cancelled() && needs.image.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # the GitHub release
+      id-token: write # attestations: signed with this workflow's identity
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,6 +98,17 @@ jobs:
           cache: npm
           cache-dependency-path: plugin/package-lock.json
 
-      - run: make deps release-plugin
+      - run: make deps check-tag build
+
+      # Build provenance for the files the release carries, before it's out: `gh attestation verify main.js
+      # --repo <owner>/<repo>` proves a file was built by this workflow from this commit
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            plugin/dist/main.js
+            plugin/dist/manifest.json
+            plugin/dist/styles.css
+
+      - run: make release-plugin
         env:
           GH_TOKEN: ${{ github.token }}

@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 
 ARG VERSION=dev
 LABEL org.opencontainers.image.version=$VERSION \
-      org.opencontainers.image.source=https://github.com/kovalevtech/obsidian-vault-sync
+      org.opencontainers.image.source=https://github.com/kovalevtech/obsidian-rock-sync
 
 # BUNDLE_USER_HOME: any uid has HOME=/, not writable — Bundler would warn and look for a temp home on every start
 ENV BUNDLE_FROZEN=1 BUNDLE_WITHOUT=development:test BUNDLE_USER_HOME=/nonexistent \

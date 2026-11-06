@@ -49,7 +49,10 @@ check-tag:
 release-image: check-tag
 	$(MAKE) -C ../backend ghcr-login push VERSION='$(TAG)' $(if $(PRERELEASE),NO_LATEST=1)
 
-release-plugin: check-tag build
+# The plugin's release from what `build` left in dist/, not built again: CI attests those files in between, so the
+# release carries exactly the attested bytes
+release-plugin: check-tag
+	@test -f dist/main.js || { echo 'dist/ is empty: make build first' >&2; exit 1; }
 	gh release create '$(TAG)' $(ARTIFACTS) --generate-notes $(if $(PRERELEASE),--prerelease)
 
 # Start a release: bump the version (package.json, the lockfile, ../manifest.json, ../versions.json), commit + tag
