@@ -7,22 +7,27 @@ class BootTest < VaultTest
   CONFIG_RU = File.expand_path('../config.ru', __dir__)
   ADMIN_ENV = Config::ADMIN_ENV.to_h { [_1, nil] }
   INIT_ENV = Config::INIT_ENV.to_h { [_1, nil] }
-  MCP_OFF = { 'MCP_ENABLED' => nil }.freeze
+  # Unset: ENABLED_APPS' default (sync)
+  APPS_ENV = { 'ENABLED_APPS' => nil, 'MCP_ENABLED' => nil }.freeze
 
-  # Boots config.ru, then sends each request (method, path, Basic credentials): [output, exit status, statuses]
+  # Boots config.ru, then sends each request (method, path — as is, `..` and all —, Basic credentials): [output, exit
+  # status, statuses]. Each request's line: `status=<code> bytes=<body size>`
   def boot(env = {}, requests = [])
     script = <<~RUBY
       app = Rack::Builder.parse_file(#{CONFIG_RU.inspect})
       #{requests.inspect}.each do |verb, path, auth|
         env = Rack::MockRequest.env_for(path, method: verb)
         env['HTTP_AUTHORIZATION'] = "Basic \#{[auth].pack('m0')}" if auth
-        warn "status=\#{app.call(env).first}"
+        status, _, body = app.call(env)
+        bytes = 0
+        body.each { bytes += _1.bytesize }
+        warn "status=\#{status} bytes=\#{bytes}"
       end
     RUBY
     env = { 'VAULTS_DIR' => @vaults_dir, 'DB_DIR' => ENV['DB_DIR'], 'RACK_ENV' => 'development' }
-          .merge(ADMIN_ENV, INIT_ENV, MCP_OFF, env)
+          .merge(ADMIN_ENV, INIT_ENV, APPS_ENV, env)
     output, status = Open3.capture2e(env, RbConfig.ruby, '-rbundler/setup', '-rrack', '-e', script, chdir: @root)
-    [output, status.exitstatus, output.scan(/^status=(\d+)$/).flatten.map(&:to_i)]
+    [output, status.exitstatus, output.scan(/^status=(\d+) /).flatten.map(&:to_i)]
   end
 
   def test_boots
@@ -139,20 +144,21 @@ class BootTest < VaultTest
     assert Dir.exist?(File.join(@vaults_dir, 'notes', 'repo.git'))
   end
 
-  def admin_env = Config::ADMIN_ENV.to_h { [_1, ENV.fetch(_1)] }
+  def admin_env = Config::ADMIN_ENV.to_h { [_1, ENV.fetch(_1)] }.merge('ENABLED_APPS' => 'sync,admin')
 
   def test_admin_mounted_with_its_env
     output, code, statuses = boot(admin_env, [['GET', '/admin/']])
     assert_equal 0, code, output
+    assert_includes output, "vault-sync: serving sync, admin\n"
     assert_equal [302], statuses
-    refute_includes output, 'admin disabled'
   end
 
   # Not there at all: /admin is one more unknown App route (401 without credentials, 404 with)
-  def test_no_admin_env_no_admin
+  def test_no_admin_unless_enabled
     output, code, statuses = boot({}, [['GET', '/admin/'], ['GET', '/admin/', "test:#{@token}"]])
     assert_equal 0, code, output
-    assert_includes output, "vault-sync: admin disabled\n"
+    assert_includes output, "vault-sync: serving sync\n"
+    refute_includes output, 'admin env'
     assert_equal [401, 404], statuses
   end
 
@@ -160,17 +166,103 @@ class BootTest < VaultTest
   def test_no_mcp_unless_enabled
     output, code, statuses = boot({}, [['POST', '/mcp'], ['POST', '/mcp', "test:#{@token}"]])
     assert_equal 0, code, output
-    assert_includes output, "vault-sync: MCP disabled\n"
     assert_equal [401, 404], statuses
   end
 
   def test_mcp_mounted_when_enabled
-    %w[true 1].each do |value|
-      output, code, statuses = boot({ 'MCP_ENABLED' => value }, [['POST', '/mcp', "test:#{@token}"]])
+    output, code, statuses = boot({ 'ENABLED_APPS' => 'sync,mcp' }, [['POST', '/mcp', "test:#{@token}"]])
+    assert_equal 0, code, output
+    assert_includes output, "vault-sync: serving sync, mcp\n"
+    assert_equal [401], statuses, 'the endpoint refuses a device token'
+  end
+
+  # Which app answers: /health (every process), Admin's login page (200; else App's 401 or the empty 404), McpEndpoint
+  # refusing a device token (401; else App's 404 for the unknown route or the empty 404), App's /vaults (200; else 404)
+  APP_PROBES = [%w[GET /health], %w[GET /admin/login], %w[POST /mcp device], %w[GET /vaults device]].freeze
+  APP_ANSWERS = {
+    'sync' => [200, 401, 404, 200],
+    'mcp' => [200, 404, 401, 404],
+    'admin' => [200, 200, 404, 404],
+    'sync,mcp' => [200, 401, 401, 200],
+    'mcp,admin' => [200, 200, 401, 404],
+    'sync, mcp , admin' => [200, 200, 401, 200]
+  }.freeze
+
+  def test_each_combination_mounts_exactly_its_apps
+    probes = APP_PROBES.map { |verb, path, auth| [verb, path, auth && "test:#{@token}"] }
+    APP_ANSWERS.each do |apps, answers|
+      output, code, statuses = boot(admin_env.merge('ENABLED_APPS' => apps), probes)
       assert_equal 0, code, output
-      refute_includes output, 'MCP disabled'
-      assert_equal [401], statuses, 'the endpoint refuses a device token'
+      assert_includes output, "vault-sync: serving #{apps.split(',').map(&:strip).join(', ')}\n"
+      assert_equal answers, statuses, apps
     end
+  end
+
+  # Without sync: what isn't there is the empty 404 of any unknown path, /pair and the sync API included
+  def test_without_sync_anything_unknown_is_an_empty_404
+    paths = ['/pair', '/files/a.md', '/manifest', '/admin/login', '/vaults', '/nothing', '/health/x']
+    output, code, statuses = boot({ 'ENABLED_APPS' => 'mcp' }, paths.map { ['GET', _1] } + [%w[POST /health]])
+    assert_equal 0, code, output
+    assert_equal [404] * 8, statuses
+    assert_equal ['0'] * 8, output.scan(/ bytes=(\d+)$/).flatten
+  end
+
+  # The review's way into /admin through a proxy allowing /files/: in a process without admin there's no Admin to reach
+  def test_admin_paths_reach_nothing_without_admin
+    paths = ['/admin/../files/a%2f..%2f..%2flogin', '//admin/login', '/admin//login', '/admin/./login', '/admin/login']
+    output, code, statuses = boot(admin_env.merge('ENABLED_APPS' => 'sync,mcp'), paths.map { ['GET', _1] })
+    assert_equal 0, code, output
+    assert_equal [401] * 5, statuses
+    output, code, statuses = boot(admin_env.merge('ENABLED_APPS' => 'mcp'), paths.map { ['GET', _1] })
+    assert_equal 0, code, output
+    assert_equal [404] * 5, statuses
+  end
+
+  def test_bad_enabled_apps_stop_the_boot
+    ['', ' ', 'sinc', 'sync,', 'sync,,mcp', 'sync,secret-thing', 'sync;mcp'].each do |apps|
+      output, code, = boot('ENABLED_APPS' => apps)
+      assert_equal 1, code, apps
+      assert_equal "vault-sync: not starting: ENABLED_APPS must list one or more of sync, mcp, admin, comma-separated\n",
+                   output
+    end
+  end
+
+  # Loud: an old setup would lose /mcp without a word
+  def test_mcp_enabled_stops_the_boot
+    %w[true 1 false].each do |value|
+      output, code, = boot('MCP_ENABLED' => value, 'ENABLED_APPS' => 'sync,mcp')
+      assert_equal 1, code, value
+      assert_equal "vault-sync: not starting: MCP_ENABLED is gone: list mcp in ENABLED_APPS instead\n", output
+    end
+  end
+
+  def test_admin_without_its_env_stops_the_boot
+    output, code, = boot('ENABLED_APPS' => 'admin')
+    assert_equal 1, code
+    assert_equal "vault-sync: not starting: Environment variable `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET` must be defined.\n",
+                 output
+  end
+
+  # The admin's settings left in a process that doesn't serve it: said once, checked no further
+  def test_admin_env_without_admin
+    output, code, statuses = boot(admin_env.merge('ENABLED_APPS' => 'sync', 'SESSION_SECRET' => nil), [['GET', '/admin/login']])
+    assert_equal 0, code, output
+    assert_includes output, "vault-sync: admin env set, admin not enabled\n"
+    refute_includes output, ENV.fetch('ADMIN_PASSWORD')
+    assert_equal [401], statuses
+  end
+
+  # INIT_* is acted on only where /pair is: checked anywhere
+  def test_init_env_only_where_sync_runs
+    output, code, = boot('ENABLED_APPS' => 'mcp', 'INIT_VAULT_NAME' => 'notes', 'INIT_VAULT_CODE' => INIT_CODE)
+    assert_equal 0, code, output
+    refute_includes output, 'notes'
+    refute Dir.exist?(File.join(@vaults_dir, 'notes'))
+    assert_empty DB[:pairings]
+
+    output, code, = boot('ENABLED_APPS' => 'mcp', 'INIT_VAULT_NAME' => 'notes', 'INIT_VAULT_CODE' => '123')
+    assert_equal 1, code
+    assert_includes output, 'INIT_VAULT_CODE must be 6 digits'
   end
 
   def test_admin_without_totp
@@ -181,7 +273,7 @@ class BootTest < VaultTest
   end
 
   def test_a_totp_secret_alone_is_not_an_admin_env
-    output, code, = boot('ADMIN_TOTP_SECRET' => ENV.fetch('ADMIN_TOTP_SECRET'))
+    output, code, = boot('ADMIN_TOTP_SECRET' => ENV.fetch('ADMIN_TOTP_SECRET'), 'ENABLED_APPS' => 'admin')
     assert_equal 1, code
     assert_includes output, 'ADMIN_USER'
     refute_includes output, ENV.fetch('ADMIN_TOTP_SECRET')

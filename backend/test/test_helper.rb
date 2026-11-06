@@ -15,8 +15,11 @@ ENV['ADMIN_USER'] = 'admin'
 ENV['ADMIN_PASSWORD'] = 'correct horse'
 ENV['ADMIN_TOTP_SECRET'] = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
 ENV['SESSION_SECRET'] = 's' * 64
-ENV['MCP_ENABLED'] = 'true'
 ENV['PUBLIC_URL'] = 'https://notes.example.com'
+# The tests mount the apps themselves (admin_test.rb, mcp_test.rb), boot_test.rb sets ENABLED_APPS per boot. Empty, not
+# unset: a developer's .env.local with the old MCP_ENABLED would stop every boot
+ENV['ENABLED_APPS'] = 'sync,mcp,admin'
+ENV['MCP_ENABLED'] = ''
 
 require_relative '../app'
 require 'minitest/autorun'

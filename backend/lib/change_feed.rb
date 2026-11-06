@@ -1,7 +1,10 @@
 # Commit notifications for long polling (GET /manifest?wait=N), one feed per vault. A dev reload replaces this class:
 # the reloader closes every feed first, so no poll waits on a stale condition variable (config.ru).
+# A notify comes only from commits of this process; another process's (MCP running apart) is seen by the re-check every
+# RECHECK seconds a wait does.
 class ChangeFeed
   MAX_WAIT = 60 # s; a client asking for more gets this
+  RECHECK = 2 # s: the latest a waiting poll hears of another process's commit
   REGISTRY = Mutex.new
   @feeds = []
   @closed = false
@@ -42,7 +45,7 @@ class ChangeFeed
   end
 
   # Blocks until the version the block returns differs from known, or timeout seconds pass. The check and the wait
-  # happen under the lock, so a commit's notify can't slip in between them.
+  # happen under the lock, so a commit's notify can't slip in between them. Checked again every RECHECK seconds
   def wait(known, timeout)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout.clamp(0, MAX_WAIT)
     @lock.synchronize do
@@ -52,7 +55,7 @@ class ChangeFeed
         remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
         return if remaining <= 0
 
-        @changed.wait(@lock, remaining)
+        @changed.wait(@lock, [remaining, RECHECK].min)
       end
     end
   end

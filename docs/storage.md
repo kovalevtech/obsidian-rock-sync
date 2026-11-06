@@ -7,8 +7,10 @@ The server keeps two things, in two separate directories: the vaults and a small
   <vault>/
     tree/                   the vault's current files, plain
     repo.git/               git history, kept outside tree
+    vault.lock              writes to the vault, one at a time across server processes
 /db                         DB_DIR
   vault-sync.db             SQLite: vaults and tokens (+ -wal, -shm next to it)
+  vault-sync.db.lock        migrations, new vaults, connection codes: one process at a time
 ```
 
 ## Why two directories

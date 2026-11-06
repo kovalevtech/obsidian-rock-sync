@@ -46,14 +46,14 @@ The server speaks plain HTTP and expects a proxy or a private network in front o
 
 ## Admin panel
 
-- Off unless `ADMIN_USER`, `ADMIN_PASSWORD` and `SESSION_SECRET` are set.
+- Off unless `admin` is in `ENABLED_APPS`, which then needs `ADMIN_USER`, `ADMIN_PASSWORD` and `SESSION_SECRET`. Run it in a container of its own that nothing public reaches ([Processes](deployment.md#processes)).
 - Login takes a password and, if `ADMIN_TOTP_SECRET` is set, a TOTP code, in one form with one generic error. A code works once. Without TOTP the password alone protects the panel, which is one more reason to keep it private.
 - After 5 failed logins, every login is refused for 60 seconds, doubling with each further failure. This is global and in memory: someone who can reach the page can keep you locked out until you restart the server, which is one more reason to keep it [off the internet](deployment.md#network).
 - The session is an encrypted cookie: `HttpOnly`, `SameSite=Strict`, `Secure`, 12 hours. All forms are protected against CSRF.
 
 ## MCP
 
-Off unless `MCP_ENABLED` is set: without it the endpoint doesn't exist. Whatever a token may not do with a path reads exactly like a path that isn't there, so it can't probe for files outside its grants. Hidden paths (any segment starting with a dot) can never be granted, listed, read or written. Tool calls are limited to 60 a minute per token. A write can't overwrite a version the token hasn't seen, and results never echo file content.
+Off unless `mcp` is in `ENABLED_APPS`: without it the endpoint doesn't exist. Whatever a token may not do with a path reads exactly like a path that isn't there, so it can't probe for files outside its grants. Hidden paths (any segment starting with a dot) can never be granted, listed, read or written. Tool calls are limited to 60 a minute per token. A write can't overwrite a version the token hasn't seen, and results never echo file content.
 
 Whatever you grant ends up in a third party's hands: what Claude reads goes to Anthropic under your account's terms.
 

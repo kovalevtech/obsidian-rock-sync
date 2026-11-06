@@ -43,7 +43,7 @@ echo "INIT_VAULT_CODE=$(LC_ALL=C tr -dc 0-9 < /dev/urandom | head -c 6)" > .env
 docker compose up -d
 ```
 
-This creates the vault `notes` and a connection code for its first device. The server now answers on this machine only; to reach it from your other devices, see [Deployment](docs/deployment.md).
+This creates the vault `notes` and a connection code for its first device. The server now answers on this machine only; to reach it from your other devices, see [Deployment](docs/deployment.md). It serves the sync API alone: the admin panel and MCP are opt-in through `ENABLED_APPS`, the admin panel best in a container of its own ([Processes](docs/deployment.md#processes)).
 
 **2. The plugin.** Install **Rock Sync** from Community plugins and enable it ([not listed yet?](docs/plugin.md#installing)).
 
@@ -68,6 +68,7 @@ If you turn on [MCP](docs/mcp.md) on your server, Claude (Anthropic) can read an
 | [Storage](docs/storage.md) | How vaults and history are kept on disk |
 | [API](docs/api.md) | The sync API, for writing another client |
 | [Development](docs/development.md) | Running from source, tests, releases |
+| [Releases](docs/releases.md) | What changed, and what to do when updating |
 
 ## License
 

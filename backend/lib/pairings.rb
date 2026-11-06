@@ -5,12 +5,12 @@ require 'securerandom'
 # reinstalled or lost it); the plugin trades it + a device name for the token (POST /pair). INIT_VAULT_CODE's code
 # (EnvInit) has no expiry: it lives until the vault's first device. MAX_WRONG wrong codes in a row burn every active
 # one, so guessing gets a few tries per code issued (per boot, for INIT_VAULT_CODE's); the worst it does is make the
-# admin issue it again.
+# admin issue it again. A code is read, then used: under the database's lock (DB.exclusively), so no two devices from one
+# code, whichever processes issue and redeem them.
 module Pairings
   TTL = 10 * 60 # s
   MAX_WRONG = 5
   ATTEMPTS = RateLimit.new(limit: 10, period: 60) # calls of redeem a minute, for everyone: there's no one to tell apart
-  LOCK = Mutex.new # a code is read, then used: one process, so no two devices from one code
 
   # A code for a new device token in the vault → [code, expires_at]. ArgumentError: no such vault
   def self.issue(vault, now: Time.now)
@@ -29,7 +29,7 @@ module Pairings
   # INIT_VAULT_CODE, every boot: the code is there, without an expiry, while the vault has no device token (revoked
   # ones count: once used, it's gone for good, a restart doesn't bring it back). code nil: dropped. → :issued | :used | nil
   def self.init(vault, code)
-    LOCK.synchronize do
+    DB.exclusively do
       DB[:pairings].where(expires_at: nil).delete
       next unless code
 
@@ -49,7 +49,7 @@ module Pairings
     return [:limited] unless ATTEMPTS.allow?(:redeem)
 
     code = code.to_s.gsub(/\s/, '')
-    LOCK.synchronize do
+    DB.exclusively do
       purge(now)
       pairing = DB[:pairings].where(code:).first
       next refuse unless pairing
@@ -65,7 +65,7 @@ module Pairings
 
   def self.insert(vault_id:, now:, device_id: nil)
     expires_at = now + TTL
-    LOCK.synchronize do
+    DB.exclusively do
       purge(now)
       code = unused_code
       DB[:pairings].insert(code:, vault_id:, device_id:, expires_at: expires_at.utc)

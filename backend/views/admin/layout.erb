@@ -18,7 +18,7 @@
     <nav class="sidebar">
       <a href="<%= path('/vaults') %>" class="<%= 'active' if page?('/vaults') %>"><%= icon(:folder) %>Vaults</a>
       <a href="<%= path('/tokens') %>" class="<%= 'active' if request.path_info.start_with?('/tokens') || page?('/connect') %>"><%= icon(:key) %>Device tokens</a>
-      <% if Config.mcp_enabled? %><a href="<%= path('/scoped') %>" class="<%= 'active' if request.path_info.start_with?('/scoped') %>"><%= icon(:extension) %>Scoped tokens</a><% end %>
+      <a href="<%= path('/scoped') %>" class="<%= 'active' if request.path_info.start_with?('/scoped') %>"><%= icon(:extension) %>Scoped tokens</a>
     </nav>
     <main class="content"><%= yield %></main>
   </div>

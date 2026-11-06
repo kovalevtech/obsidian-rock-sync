@@ -129,46 +129,17 @@ class AdminTest < VaultTest
     assert_equal '/admin/', login(code: '')['Location']
   end
 
-  def with_mcp_off
-    before = ENV.delete('MCP_ENABLED')
-    yield
-  ensure
-    ENV['MCP_ENABLED'] = before
-  end
-
-  def test_scoped_tokens_only_with_mcp
+  # /mcp may run in another process (ENABLED_APPS): the panel always has the scoped tokens, behind its login
+  def test_scoped_tokens_whatever_this_process_serves
+    get '/admin/scoped'
+    assert_login_page last_response
     login
     get '/admin/vaults'
     assert_includes last_response.body, 'Scoped tokens'
-    token = csrf
-    with_mcp_off do
-      get '/admin/vaults'
-      assert_equal 200, last_response.status
-      refute_includes last_response.body, 'Scoped tokens'
-      id = Devices.create_scoped(name: 'claude').first.id
-      %w[/admin/scoped /admin/scoped/new /admin/scoped/1].each do |path|
-        get path
-        assert_equal 404, last_response.status, path
-      end
-      ['/admin/scoped', "/admin/scoped/#{id}", "/admin/scoped/#{id}/revoke"].each do |path|
-        post path, 'name' => 'x', 'authenticity_token' => token
-        assert_equal 404, last_response.status, path
-      end
-      assert_nil Devices.find(id, kind: 'scoped')[:revoked_at]
-      get '/admin/tokens'
-      assert_equal 200, last_response.status
-    end
+    Devices.create_scoped(name: 'claude')
     get '/admin/scoped'
     assert_equal 200, last_response.status
     assert_includes last_response.body, 'claude'
-  end
-
-  # Off means gone, but a session still comes first: nothing about it without one
-  def test_scoped_tokens_with_mcp_off_need_a_session_like_anything
-    with_mcp_off do
-      get '/admin/scoped'
-      assert_login_page last_response
-    end
   end
 
   def test_wrong_credentials

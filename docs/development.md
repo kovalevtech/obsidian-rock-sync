@@ -13,7 +13,7 @@ bundle exec rackup   # localhost:9292
 make test
 ```
 
-Out of the box it keeps its data in `backend/tmp/data` and `backend/tmp/db` (gitignored). `make vault NAME=…` creates a vault, `make vault-code VAULT=…` prints a connection code for it and its connection link (the plugin's **Connect**, or curl's `POST /pair`), both without the admin panel.
+It serves the sync API and MCP (`ENABLED_APPS=sync,mcp` in `.env`); for the admin panel too, set its settings and `ENABLED_APPS=sync,mcp,admin` in `.env.local`. Out of the box it keeps its data in `backend/tmp/data` and `backend/tmp/db` (gitignored). `make vault NAME=…` creates a vault, `make vault-code VAULT=…` prints a connection code for it and its connection link (the plugin's **Connect**, or curl's `POST /pair`), both without the admin panel.
 
 ## Plugin
 

@@ -1,5 +1,4 @@
 require 'fileutils'
-require 'monitor'
 
 # One vault on disk: VAULTS_DIR/<name>/tree (current files, plain) + VAULTS_DIR/<name>/repo.git (history, kept outside the
 # tree), with its own lock and change feed. Every change is one commit. A vault exists when its row (DB[:vaults]) and
@@ -22,14 +21,18 @@ class Vault
   end
 
   # Tree + empty repo (an existing one is kept), then the row. ArgumentError: bad name, name taken, VAULTS_DIR missing
-  # (not created: it's a mount — a repo written to the mount point would land outside the storage)
+  # (not created: it's a mount — a repo written to the mount point would land outside the storage). Under the
+  # database's lock: the admin process and another's EnvInit don't both set it up
   def self.create(name)
     raise ArgumentError, "bad vault name #{name.inspect}: [a-z0-9-], at most 64" unless name.to_s.match?(NAME)
-    raise ArgumentError, "vault #{name} exists" unless DB[:vaults].where(name:).empty?
-    raise ArgumentError, "vaults directory missing: #{Config.vaults_dir}" unless Dir.exist?(Config.vaults_dir)
 
-    new(name, dir_of(name)).setup!
-    DB[:vaults].insert(name:, created_at: Time.now)
+    DB.exclusively do
+      raise ArgumentError, "vault #{name} exists" unless DB[:vaults].where(name:).empty?
+      raise ArgumentError, "vaults directory missing: #{Config.vaults_dir}" unless Dir.exist?(Config.vaults_dir)
+
+      new(name, dir_of(name)).setup!
+      DB[:vaults].insert(name:, created_at: Time.now)
+    end
     find(name)
   rescue Sequel::UniqueConstraintViolation
     raise ArgumentError, "vault #{name} exists"
@@ -59,9 +62,10 @@ class Vault
     @tree = File.join(dir, 'tree')
     # Temp files of merges next to the data: vault content stays on its storage
     @git = Git.new(git_dir: File.join(dir, 'repo.git'), work_tree: @tree, user: %w[sync sync@localhost], tmp_dir: dir)
-    # The git index is not safe for concurrent writes; readers take it too, not to see a half-written file.
-    # Reentrant (Monitor): WriteFile holds it while MergeVersions takes it again
-    @lock = Monitor.new
+    # The git index is not safe for concurrent writes; readers take it too, not to see a half-written file. Across
+    # processes (sync and mcp may run apart, on the same vault): a file next to tree / repo.git. Reentrant within the
+    # process: WriteFile holds it while MergeVersions takes it again
+    @lock = FileLock.new(File.join(dir, 'vault.lock'))
     @feed = ChangeFeed.new
     @compaction_lock = Mutex.new
   end

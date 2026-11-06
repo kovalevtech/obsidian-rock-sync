@@ -1,11 +1,11 @@
 require_relative 'environment'
 require 'digest'
 
-# The admin panel at /admin (config.ru mounts it only when Config.admin is set): vaults, device tokens, scoped tokens
+# The admin panel at /admin (config.ru mounts it only with admin in ENABLED_APPS): vaults, device tokens, scoped tokens
 # (MCP) and their grants. Outside App:
 # App's device auth doesn't apply; its own login (user + password, + TOTP if it has a secret), session cookie and CSRF
-# tokens do. Scoped tokens' pages only with MCP on: without it they're like any unknown route. Not
-# reloaded by Zeitwerk (like app.rb): its login state lives as long as the process.
+# tokens do. Scoped tokens' pages always: /mcp may run in another process, which this one can't see. Not
+# reloaded by Zeitwerk (like app.rb): its login state lives as long as the process (not shared with other processes).
 class Admin < Sinatra::Base
   SESSION_TTL = 12 * 60 * 60 # s; the cookie expires then, and the server checks admin_at against it too
 
@@ -140,7 +140,6 @@ class Admin < Sinatra::Base
       redirect '/login'
     end
     env['vault_sync.auth'] = 'admin'
-    halt 404 if request.path_info.start_with?('/scoped') && !Config.mcp_enabled?
   end
 
   get '/login' do

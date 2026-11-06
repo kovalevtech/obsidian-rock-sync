@@ -1,15 +1,22 @@
-require_relative './app'
+require_relative 'environment'
 
 $stdout.sync = true # logs go to stdout; in a container that isn't a TTY, unsynced lines would wait in a buffer
 
-# Boot: one log line and exit 1 when DB_DIR or VAULTS_DIR is missing (not mounted), a vault in the database has no
-# repo in VAULTS_DIR (its storage not mounted), or the admin env / INIT_* is partial / invalid.
-# The database file itself is created and migrated; neither directory ever is. Then what INIT_* asks for, if it's missing
+# Boot: one log line and exit 1 when ENABLED_APPS is invalid (or MCP_ENABLED still set), DB_DIR or VAULTS_DIR is
+# missing (not mounted), a vault in the database has no repo in VAULTS_DIR (its storage not mounted), admin is enabled
+# without its env, or the admin env / INIT_* is partial / invalid.
+# The database file itself is created and migrated; neither directory ever is. Then, where sync runs, what INIT_* asks
+# for, if it's missing: its code is redeemed through /pair, and a process that can't redeem it shouldn't reset its
+# wrong guesses with a restart
 begin
+  apps = Config.enabled_apps
   DB.current
   Vault.check!
-  admin = Config.admin
-  EnvInit.call(Config.init)
+  if apps.include?('admin')
+    admin = Config.admin or raise Config::EnvValueNotDefined, 'ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET'
+  end
+  init = Config.init
+  EnvInit.call(init) if apps.include?('sync')
 rescue StandardError => e
   abort "vault-sync: not starting: #{e.message}"
 end
@@ -107,21 +114,34 @@ end
 use ZeitwerkReloader if Config.zeitwerk_reload?
 use LogRequestAndResponse if Config.verbose_http_logs?
 
-# Claude's connector: its own auth (a Bearer token), outside App's; not there at all unless asked for
-if Config.mcp_enabled?
+puts "vault-sync: serving #{apps.join(', ')}"
+
+# Claude's connector: its own auth (a Bearer token), outside App's; not there at all unless enabled
+if apps.include?('mcp')
   require_relative 'mcp_endpoint'
   map('/mcp') { run McpEndpoint }
-else
-  puts 'vault-sync: MCP disabled'
 end
 
-# Admin panel: its own app, outside App's auth; not there at all without its env
+# Admin panel: its own app, outside App's auth; not there at all unless enabled
 if admin
   require_relative 'admin'
   map('/admin') { run Admin }
   puts 'vault-sync: admin without TOTP, the password alone protects it' unless admin.totp_secret
-else
-  puts 'vault-sync: admin disabled'
+elsif Config.admin_env?
+  puts 'vault-sync: admin env set, admin not enabled'
 end
 
-run App
+# Without sync: /health (every container's healthcheck), else the empty 404 of any unknown path. A disabled app's paths
+# land here or in App's default-deny like any other: nothing says it runs elsewhere
+NO_SYNC = lambda do |env|
+  next [404, {}, []] unless env['PATH_INFO'] == '/health' && %w[GET HEAD].include?(env['REQUEST_METHOD'])
+
+  [200, { 'content-type' => 'text/plain', 'cache-control' => 'no-store' }, env['REQUEST_METHOD'] == 'HEAD' ? [] : ['ok']]
+end
+
+if apps.include?('sync')
+  require_relative 'app'
+  run App
+else
+  run NO_SYNC
+end

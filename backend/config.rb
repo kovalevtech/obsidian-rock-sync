@@ -23,6 +23,25 @@ class Config
   ADMIN_ENV = %w[ADMIN_USER ADMIN_PASSWORD ADMIN_TOTP_SECRET SESSION_SECRET].freeze
   ADMIN_OPTIONAL = %w[ADMIN_TOTP_SECRET].freeze
 
+  # What a process serves: sync = App (the sync API, /pair, /vaults, /token), mcp = McpEndpoint (/mcp), admin = Admin
+  # (/admin). Processes of the same image on the same data may serve different ones: the admin where nothing public
+  # reaches it
+  APPS = %w[sync mcp admin].freeze
+
+  # ENABLED_APPS, comma-separated, in APPS' order; unset → sync. Empty, or a name not in APPS → raises. MCP_ENABLED (its
+  # predecessor) set → raises: an old setup would lose /mcp without a word
+  def self.enabled_apps
+    raise EnvValueInvalid, 'MCP_ENABLED is gone: list mcp in ENABLED_APPS instead' unless ENV['MCP_ENABLED'].to_s.empty?
+    return %w[sync] unless ENV.key?('ENABLED_APPS')
+
+    apps = ENV['ENABLED_APPS'].split(',', -1).map(&:strip)
+    unless apps.any? && (apps - APPS).empty?
+      raise EnvValueInvalid, "ENABLED_APPS must list one or more of #{APPS.join(', ')}, comma-separated"
+    end
+
+    APPS & apps
+  end
+
   def self.zeitwerk_reload?
     %w[true 1].include? ENV['ZEITWERK_RELOAD'].to_s
   end
@@ -41,8 +60,11 @@ class Config
   # Puma's max threads (config/puma.rb); the DB pool has as many connections
   def self.max_threads = 16
 
-  # nil when none of ADMIN_ENV is set (admin panel off); a required one missing, a TOTP secret that isn't base32 or a
-  # short session secret → raises. No TOTP secret: password only
+  # Any of ADMIN_ENV set (config.ru: in a process without admin, worth a line in the log)
+  def self.admin_env? = ENV.values_at(*ADMIN_ENV).any? { !_1.to_s.empty? }
+
+  # nil when none of ADMIN_ENV is set; a required one missing, a TOTP secret that isn't base32 or a short session secret
+  # → raises. No TOTP secret: password only
   def self.admin
     values = ENV.values_at(*ADMIN_ENV).map { _1.to_s.empty? ? nil : _1 }
     return if values.none?
@@ -99,9 +121,6 @@ class Config
   def self.mcp_max_write
     Integer(ENV.fetch('MCP_MAX_WRITE', 1024 * 1024))
   end
-
-  # The MCP endpoint at /mcp and the admin panel's scoped tokens; off unless asked for
-  def self.mcp_enabled? = %w[true 1].include?(ENV['MCP_ENABLED'].to_s)
 
   # The server's origin for the MCP URL the admin panel shows, when Claude reaches it elsewhere than devices do (only
   # /mcp in public); unset → public_url
