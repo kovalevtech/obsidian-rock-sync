@@ -1,6 +1,6 @@
 # Container
 
-The server ships as a Docker image for `linux/amd64`: `ghcr.io/kovalevtech/obsidian-rock-sync`, tagged `<version>` and `latest`. For a minimal `compose.yml`, see the [quick start](../README.md#quick-start); for what to put around it, [Deployment](deployment.md).
+The server ships as a Docker image for `linux/amd64`: `ghcr.io/kovalevtech/obsidian-rock-sync`, tagged `<version>` and `latest` (a beta, `<version>-beta.<n>`, only `<version>`: see [Development](development.md#betas)). For a minimal `compose.yml`, see the [quick start](../README.md#quick-start); for what to put around it, [Deployment](deployment.md).
 
 ## First run
 
