@@ -7,7 +7,7 @@ class GitTest < VaultTest
     hash = commit_file('a.md', "a\n")
     moved = "#{@vaults_dir}-moved"
     FileUtils.mv(@vaults_dir, moved)
-    git = Git.new(git_dir: File.join(moved, 'test', 'repo.git'), work_tree: File.join(moved, 'test', 'tree'))
+    git = Git.new(git_dir: File.join(moved, 'test', 'repo.git'))
 
     assert_equal "a\n", git.cat_file(hash)
     assert_equal hash, git.hash_object("a\n")

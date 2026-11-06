@@ -118,6 +118,21 @@ class McpTest < VaultTest
     end
   end
 
+  # Never parsed (FormBody): over Rack's params limit, parsed, it was a 500 before the token was looked at
+  def test_form_bodies_are_refused_unparsed
+    { 'application/x-www-form-urlencoded' => 'a=1&' * 5000,
+      'multipart/form-data; boundary=x' => "--x\r\nContent-Disposition: form-data; name=\"f\"\r\n\r\nf\r\n--x--\r\n" }
+      .each do |type, body|
+        { nil => 401, "Bearer #{@secret}x" => 401, "Bearer #{@secret}" => 415 }.each do |header, status|
+          env = { 'CONTENT_TYPE' => type, input: body }
+          env['HTTP_AUTHORIZATION'] = header if header
+          post '/mcp', nil, env
+          assert_equal status, last_response.status, "#{type}, #{header.inspect}"
+          assert_equal [[], nil], [last_request.env['rack.request.form_pairs'], last_request.env['rack.request.form_vars']]
+        end
+      end
+  end
+
   def test_the_sync_api_refuses_a_scoped_token
     basic_authorize('test', @secret)
     get '/manifest'
@@ -534,8 +549,8 @@ class McpTest < VaultTest
     { 'Journal/old-device.md' => ['pixel', 'pixel@vault-sync', 'plugin=0.1.0'], 'Journal/old-mcp.md' => ['claude-old', 'claude-old@vault-sync', 'mcp'],
       'Journal/old-bare.md' => ['laptop', 'laptop@vault-sync', nil] }.each do |path, (name, email, client)|
       File.write(tree_file(path), "#{path}\n")
-      @vault.git.add(path)
-      @vault.git.commit("PUT #{path}#{"\n\nClient: #{client}" if client}", author: [name, email])
+      @vault.git.commit("PUT #{path}#{"\n\nClient: #{client}" if client}", { path => @vault.git.hash_object("#{path}\n") },
+                        author: [name, email])
     end
     commit_file('Journal/server.md', "s\n")
 
@@ -570,7 +585,6 @@ class McpTest < VaultTest
   def test_the_token_and_contents_stay_out_of_the_logs
     commit_file('Journal/secret.md', "diary entry\n")
     errors = StringIO.new
-    config_ru = Rack::Builder.parse_file(File.expand_path('../config.ru', __dir__))
     logged = Rack::Lint.new(Rack::CommonLogger.new(config_ru, errors))
     read = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'read_file', arguments: { path: 'Journal/secret.md' } } }
     out, = capture_io do
@@ -586,4 +600,14 @@ class McpTest < VaultTest
     assert_includes out, 'mcp auth failed'
     assert_includes errors.string, 'POST /mcp '
   end
+
+  # ALLOWED_VAULTS is the sync API's: MCP goes by its tokens' grants alone
+  def test_allowed_vaults_dont_limit_mcp
+    ENV['ALLOWED_VAULTS'] = 'other'
+    assert_equal GRANTS.size, ok('list_access').size
+    ok('write_file', path: 'Inbox/allowed', content: 'x')
+  ensure
+    ENV['ALLOWED_VAULTS'] = ''
+  end
+
 end

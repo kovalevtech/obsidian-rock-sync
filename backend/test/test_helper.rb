@@ -15,8 +15,13 @@ ENV['ADMIN_USER'] = 'admin'
 ENV['ADMIN_PASSWORD'] = 'correct horse'
 ENV['ADMIN_TOTP_SECRET'] = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'
 ENV['SESSION_SECRET'] = 's' * 64
-ENV['MCP_ENABLED'] = 'true'
 ENV['PUBLIC_URL'] = 'https://notes.example.com'
+# The tests mount the apps themselves (admin_test.rb, mcp_test.rb), boot_test.rb sets ENABLED_APPS per boot. Empty, not
+# unset: a developer's .env.local with the old MCP_ENABLED would stop every boot
+ENV['ENABLED_APPS'] = 'sync,mcp,admin'
+ENV['MCP_ENABLED'] = ''
+# Every vault, whatever the developer's .env.local says; tests of ALLOWED_VAULTS set it themselves
+ENV['ALLOWED_VAULTS'] = ''
 
 require_relative '../app'
 require 'minitest/autorun'
@@ -58,11 +63,18 @@ class VaultTest < Minitest::Test
 
   # A committed version, straight through git (independent of the services under test); returns its blob hash
   def commit_file(path, content)
-    FileUtils.mkdir_p(File.dirname(tree_file(path)))
-    File.binwrite(tree_file(path), content)
-    @vault.git.add(path)
-    @vault.commit("TEST #{path}")
+    @vault.commit("TEST #{path}", write: { path => content })
     blob(content)
+  end
+
+  # config.ru as the server runs it (its boot part's lines swallowed), parsed once: parsed again, it would redefine its
+  # classes' constants (warnings)
+  def config_ru
+    $config_ru ||= begin
+      app = nil
+      capture_io { app = Rack::Builder.parse_file(File.expand_path('../config.ru', __dir__)) }
+      app
+    end
   end
 
   def last_commit_message

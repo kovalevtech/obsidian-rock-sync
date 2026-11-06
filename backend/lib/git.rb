@@ -2,20 +2,27 @@ require 'digest'
 require 'open3'
 require 'tmpdir'
 
-# Thin wrapper around the git CLI: one repository (git dir + work tree), only the commands we use. Knows nothing
-# about what's stored in it.
+# Thin wrapper around the git CLI: one repository used as a content store — blobs, trees, commits, its index — never
+# through a work tree; only the commands we use. Knows nothing about what's stored in it, nor where the files are kept
+# as plain files (the vault's tree/ is the vault's business): nothing there — .gitignore, .gitattributes, a nested
+# .git — changes what git does.
 class Git
   class Error < StandardError; end
 
-  # The user's own git config stays out (commit signing, hooks, merge styles): same behaviour on every machine
-  ENV_ISOLATED = { 'GIT_CONFIG_GLOBAL' => File::NULL, 'GIT_CONFIG_NOSYSTEM' => '1' }.freeze
+  # The user's own git config stays out (commit signing, hooks, merge styles): same behaviour on every machine. Paths
+  # are literal everywhere: no pathspec magic (`:/x`, `:(exclude)x`, `*.md` are names)
+  ENV_ISOLATED = { 'GIT_CONFIG_GLOBAL' => File::NULL, 'GIT_CONFIG_NOSYSTEM' => '1', 'GIT_LITERAL_PATHSPECS' => '1' }.freeze
+  # New paths in the index: .git look-alikes refused whatever the platform's default (HFS+ / NTFS spellings). HEAD
+  # read into it as it is (read-tree checks paths too): a vault holding one from before must not stop taking writes
+  PROTECT_PATHS = %w[-c core.protectHFS=true -c core.protectNTFS=true].freeze
+  TAKE_PATHS = %w[-c core.protectHFS=false -c core.protectNTFS=false].freeze
+  NO_SHA = '0' * 40
 
-  attr_reader :git_dir, :work_tree
+  attr_reader :git_dir
 
   # user: [name, email] for commits. tmp_dir: where merge_file puts its temp files (keep content where the repo is)
-  def initialize(git_dir:, work_tree:, user: %w[git git@localhost], tmp_dir: Dir.tmpdir)
+  def initialize(git_dir:, user: %w[git git@localhost], tmp_dir: Dir.tmpdir)
     @git_dir = git_dir
-    @work_tree = work_tree
     @user = user
     @tmp_dir = tmp_dir
   end
@@ -30,32 +37,43 @@ class Git
   end
 
   # Without --work-tree: git would store it in the repo's config as an absolute core.worktree, and commands naming only
-  # the git dir (cat_file, hash_object) would fail once VAULTS_DIR is mounted elsewhere (a container, a restore). The
-  # repo is bare; every command passes the work tree itself
+  # the git dir would fail once VAULTS_DIR is mounted elsewhere (a container, a restore)
   def init(branch: 'main')
-    out, status = Open3.capture2e(ENV_ISOLATED, 'git', "--git-dir=#{git_dir}", 'init', '-q', '-b', branch, chdir: work_tree)
+    out, status = Open3.capture2e(ENV_ISOLATED, 'git', "--git-dir=#{git_dir}", 'init', '-q', '-b', branch,
+                                  chdir: File.dirname(git_dir))
     raise Error, "git init failed: #{out}" unless status.success?
   end
 
-  def add(path) = run('add', '--', path)
-  def rm(path) = run('rm', '-q', '--', path)
-  def mv(from, to) = run('mv', '--', from, to)
-  # author: [name, email]; nil = the committer (user)
-  def commit(message, author: nil)
+  # One commit on top of HEAD; returns its hash. changes: { path => blob hash (hash_object) | nil (removed) }.
+  # Plumbing only (read-tree, update-index, write-tree, commit-tree, update-ref): nothing is read from a work tree, so
+  # no ignore rules, attributes, filters, hooks or nested repos — git stores exactly the blobs it's given. The index is
+  # reset to HEAD first: what a failed attempt left in it never slips into a commit, and it stays equal to HEAD (a
+  # cleanup by hand can use it). author: [name, email]; nil = the committer (user)
+  def commit(message, changes, author: nil)
+    parent = run('rev-parse', '-q', '--verify', 'HEAD^{commit}', allow_failure: true).chomp
+    parent = nil if parent.empty?
+    run(*(parent ? ['read-tree', parent] : %w[read-tree --empty]), config: TAKE_PATHS)
+    # Mode 0 = remove. update-index checks each path: no .git, nor its look-alikes (PROTECT_PATHS)
+    entries = changes.map { |path, sha| "#{sha ? "100644 #{sha}" : "0 #{NO_SHA}"}\t#{path}\0" }.join
+    run('update-index', '-z', '--add', '--index-info', stdin: entries, config: PROTECT_PATHS)
+    tree = run('write-tree').chomp
     env = author ? { 'GIT_AUTHOR_NAME' => author[0], 'GIT_AUTHOR_EMAIL' => author[1] } : {}
-    run('commit', '-q', '-m', message, env:)
+    commit = run('commit-tree', tree, *(parent ? ['-p', parent] : []), stdin: "#{message}\n", env:).chomp
+    # Only from the parent read above (the vault lock keeps others out; if anything moved HEAD meanwhile, this fails)
+    run('update-ref', 'HEAD', commit, parent || NO_SHA)
+    commit
   end
 
-  # Stores content as a blob; returns its hash
+  # Stores content as a blob; returns its hash. From stdin, without --path: no filters, the bytes as given
   def hash_object(content)
-    run_stdin(content, 'hash-object', '-w', '--stdin').chomp
+    run('hash-object', '-w', '--stdin', stdin: content).chomp
   end
 
   # Blob content by hash; nil if git doesn't have it (never stored, or gc'd)
   def cat_file(hash)
     return nil unless hash.to_s.match?(/\A\h{40}\z/)
 
-    out, _err, status = Open3.capture3(ENV_ISOLATED, 'git', "--git-dir=#{git_dir}", 'cat-file', 'blob', hash, binmode: true)
+    out, _err, status = Open3.capture3(ENV_ISOLATED, *command, 'cat-file', 'blob', hash, binmode: true, chdir: git_dir)
     status.success? ? out : nil
   end
 
@@ -91,9 +109,8 @@ class Git
 
     # -z: raw paths, NUL after each. A commit = RS, its fields split by US, NUL, "\n", then its paths
     format = '%x1e%ct%x1f%an%x1f%ae%x1f%(trailers:key=Client,valueonly,separator=%x2C)'
-    command = ['git', "--git-dir=#{git_dir}", '--literal-pathspecs', 'log', '-z', "--format=#{format}", '--name-only',
-               *(under.empty? ? [] : ['--', under])]
-    IO.popen(ENV_ISOLATED, command, 'rb', chdir: work_tree, err: File::NULL) do |io|
+    log = [*command, 'log', '-z', "--format=#{format}", '--name-only', *(under.empty? ? [] : ['--', under])]
+    IO.popen(ENV_ISOLATED, log, 'rb', chdir: git_dir, err: File::NULL) do |io|
       io.each_line("\x1e") do |record|
         header, *names = record.chomp("\x1e").force_encoding(Encoding::UTF_8).split("\0")
         next unless header
@@ -113,16 +130,18 @@ class Git
 
   # 3-way merge of contents (not paths): [text, number of conflicts], or nil if git can't (binary files).
   # labels: [current, base, other] for the conflict markers. conflictStyle pinned: a global diff3 / zdiff3 setting
-  # would add a base section (kept although the global config is out: the repo's own config could set it)
+  # would add a base section (kept although the global config is out: the repo's own config could set it). Temp files
+  # outside any work tree, named by us: no attributes (merge drivers, eol) apply; --git-dir: no repo looked for around
+  # the server's working directory
   def merge_file(current, base, other, labels:, marker_size: 7)
     Dir.mktmpdir('merge-', @tmp_dir) do |dir|
       files = { current:, base:, other: }.map do |name, data|
         File.join(dir, name.to_s).tap { |f| File.binwrite(f, data) }
       end
       out, _err, status = Open3.capture3( # err: "Cannot merge binary files" — an outcome, not an error
-        ENV_ISOLATED, 'git', '-c', 'merge.conflictStyle=merge', 'merge-file', '-p', "--marker-size=#{marker_size}",
+        ENV_ISOLATED, *command, '-c', 'merge.conflictStyle=merge', 'merge-file', '-p', "--marker-size=#{marker_size}",
         *labels.flat_map { ['-L', _1] }, *files,
-        binmode: true
+        binmode: true, chdir: dir
       )
       # exit status = number of conflicts (capped at 127), >127 on error (binary files included)
       next nil if status.exitstatus.nil? || status.exitstatus > 127
@@ -147,21 +166,19 @@ class Git
 
   private
 
-  def run(*args, env: {})
-    out, status = Open3.capture2e(
-      ENV_ISOLATED.merge(env), 'git', "--git-dir=#{git_dir}", "--work-tree=#{work_tree}",
-      '-c', "user.name=#{@user[0]}", '-c', "user.email=#{@user[1]}",
-      *args, chdir: work_tree
-    )
-    raise Error, "git #{args.first} failed: #{out}" unless status.success?
+  # stdin: data for the command (binary). config: `-c` options for this one. allow_failure: its output whatever the
+  # exit status
+  def run(*args, env: {}, stdin: '', config: [], allow_failure: false)
+    out, err, status = Open3.capture3(ENV_ISOLATED.merge(env), *command, *config, *args, stdin_data: stdin,
+                                                                                         binmode: true, chdir: git_dir)
+    raise Error, "git #{args.first} failed: #{err}" unless status.success? || allow_failure
 
-    out
+    out.force_encoding(Encoding::UTF_8) # paths, hashes, numbers (binary in: stdin only)
   end
 
-  def run_stdin(data, *args)
-    out, status = Open3.capture2e(ENV_ISOLATED, 'git', "--git-dir=#{git_dir}", *args, stdin_data: data, binmode: true)
-    raise Error, "git #{args.first} failed: #{out}" unless status.success?
-
-    out
+  # The work tree is the git dir itself (it overrides a core.worktree from before, too): whatever a command might look
+  # for in a work tree (.gitattributes, .gitignore, a .git) is never the vault's
+  def command
+    ['git', "--git-dir=#{git_dir}", "--work-tree=#{git_dir}", '-c', "user.name=#{@user[0]}", '-c', "user.email=#{@user[1]}"]
   end
 end

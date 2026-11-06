@@ -4,7 +4,9 @@ The panel at `/admin` manages vaults and tokens. It's optional: without it the s
 
 ## Turning it on
 
-Set the user, the password, the session secret and the public URL. With none of the first three set, the panel is off and the log says `admin disabled`. With only some set, or without the public URL, the server refuses to start.
+Add `admin` to [`ENABLED_APPS`](deployment.md#processes), and set the user, the password, the session secret and the public URL. Without `admin` there the panel doesn't exist, whatever else is set. With it, and any of these missing, the server refuses to start.
+
+Run it in a container of its own, on the same mounts as the one serving sync, that no proxy, tunnel or public port reaches: only your private network or the machine itself ([Processes](deployment.md#processes)).
 
 | Setting | Value |
 |---|---|
@@ -27,11 +29,11 @@ openssl rand -hex 64
 
 **TOTP is optional, and worth having.** Without `ADMIN_TOTP_SECRET` the login form has no code field and the password alone protects the panel, so make it long; the log says so at every start.
 
-Keep it off the public internet if you can ([why](security.md#admin-panel)).
+Keep it off the public internet ([why](security.md#admin-panel)).
 
 ## Logging in
 
-User name, password and, with TOTP, the current code, in one form. A code works only once, so a second login within the same 30 seconds has to wait for the next code. After 5 failures, all logins are refused for 60 seconds, doubling with each further failure; restarting the server clears that. The session lasts 12 hours.
+User name, password and, with TOTP, the current code, in one form. A code works only once, so a second login within the same 30 seconds has to wait for the next code. After 5 failures, all logins are refused for 60 seconds, doubling with each further failure; restarting the container that serves the panel clears that. The session lasts 12 hours.
 
 ## Vaults
 
@@ -59,7 +61,7 @@ One per device and vault: a phone syncing two vaults has two. The name becomes t
 
 ## Scoped tokens
 
-One per [MCP connector](mcp.md). This page is there only with [`MCP_ENABLED`](mcp.md#connecting-claude). The list shows each token's grants, when it was created and last used, and its status. **Show revoked** includes revoked ones.
+One per [MCP connector](mcp.md). The page is always there; the tokens work where `mcp` is in [`ENABLED_APPS`](mcp.md#connecting-claude), in this container or another. The list shows each token's grants, when it was created and last used, and its status. **Show revoked** includes revoked ones.
 
 - **New token:** a name and at least one [grant](mcp.md#grants). The next page shows the token once, with the URL and header for the connector.
 - **Edit:** the name and all grants are saved together, or not at all, with errors shown on their rows. Renaming changes the author of later commits only.

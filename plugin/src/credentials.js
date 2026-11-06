@@ -61,11 +61,13 @@ export default class Credentials {
   }
 
   // DELETE /token: a token no vault here uses any more revokes itself. One attempt, its answer doesn't matter: offline,
-  // the admin panel revokes it; a token with several vaults (from before codes) is kept by the server (409)
-  async revoke({ endpoint, token }) {
+  // the admin panel revokes it; a token with several vaults (from before codes) is kept by the server (409).
+  // With the token's vault (the saved one, or an unsaved draft's): it goes out as X-Rock-Sync-Vault too, so a proxy
+  // letting only that vault through lets the revoke through as well (the server checks it against the token's)
+  async revoke({ endpoint, vault, token }) {
     if (!endpoint || !token) return;
     try {
-      const res = await request({ url: tokenUrl(endpoint), method: 'DELETE', credentials: { endpoint, vault: '', token }, attempts: 1, throw: false });
+      const res = await request({ url: tokenUrl(endpoint), method: 'DELETE', credentials: { endpoint, vault, token }, attempts: 1, throw: false });
       debug('token revoked:', res.status);
     } catch (e) {
       debug('token not revoked: server unreachable', String(e));

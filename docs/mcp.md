@@ -4,7 +4,7 @@ The server has an [MCP](https://modelcontextprotocol.io) endpoint, so Claude can
 
 ## Connecting Claude
 
-1. Set `MCP_ENABLED=true` on the server. It's off by default: `/mcp` doesn't exist and the admin panel has no scoped tokens, and the log says `MCP disabled`.
+1. Add `mcp` to `ENABLED_APPS` on the server, such as `ENABLED_APPS=sync,mcp` ([Processes](deployment.md#processes)). It's off by default: `/mcp` doesn't exist.
 2. In the [admin panel](admin.md#scoped-tokens), open **Scoped tokens** → **New token**, give it a name and at least one [grant](#grants).
 3. The next page shows the URL and the token, once.
 4. In claude.ai: **Settings → Connectors → Add custom connector**, with that URL and **No sign-in**. Under **Request headers**, add `Authorization` with the value `Bearer <token>`.
@@ -119,6 +119,7 @@ Hitting a limit gives a tool error with a message Claude can act on, such as wri
 | `405` + `Allow: POST` | Any method but `POST` |
 | `404` | Any path below `/mcp` |
 | `413` | Body over `MAX_FILE_SIZE` |
+| `415` | A form or multipart body (`application/x-www-form-urlencoded`, `multipart/*`): never read |
 
 To try it by hand:
 

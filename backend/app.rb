@@ -10,7 +10,7 @@ class App < Sinatra::Base
   error StandardError do
     e = env['sinatra.error']
     case e.class.name
-    when 'Vault::Path::BadPath' then [400, e.message]
+    when 'Vault::Path::BadPath', 'Vault::Path::Hidden' then [400, e.message]
     when 'Vault::NotFound', 'Sinatra::NotFound' then 404 # the latter: no such route
     else 500
     end
@@ -25,17 +25,27 @@ class App < Sinatra::Base
   PAIR_MAX_BODY = 1024 # bytes read of POST /pair's body: no credentials, so not whatever anyone sends
   # GET /manifest's ETag before a vault's first commit (no HEAD yet): polls wait past it like past a version
   NO_COMMITS = 'no-commits'
+  # A long poll over PollSlots' caps: 429 + Retry-After (s; the plugin backs off 5 s on any failure anyway)
+  POLLS_REFUSED = JSON.generate(error: 'too many polls')
+  POLL_RETRY_AFTER = '5'
+
+  # Sinatra parses a form body into params before any filter, auth included: here none is, ever (FormBody)
+  def call!(env)
+    FormBody.ignore(env)
+    super
+  end
 
   # Auth first: nobody learns the size limit without a token. Over the limit: refused before the body is read. Puma
-  # does the same (config/puma.rb), without even buffering it
+  # does the same (config/puma.rb), without even buffering it. Then form bodies: refused, unread
   before do
     # An old version from a client's HTTP cache looks synced: a file with a Last-Modified counts as fresh for a tenth of
     # its age there, no request made (Obsidian's requestUrl on desktop is Chromium's)
     cache_control :no_store
     unless PUBLIC.include?(request.path_info)
-      DEVICE_ONLY.include?(request.path_info) ? authenticate_device! : authenticate!
+      DEVICE_ONLY.include?(request.path_info) ? authenticate_token! : authenticate!
     end
     halt 413 if request.content_length.to_i > Config.max_file_size
+    halt 415 if FormBody.sent?(request)
   end
 
   helpers do
@@ -44,13 +54,31 @@ class App < Sinatra::Base
     # a revoked token. The reason goes to the log only (env['vault_sync.auth'], config.ru)
     def authenticate!
       vault_name = authenticate_device!
-      # X-Rock-Sync-Vault: Basic's vault in the clear, for a proxy in front (Cloudflare) to filter on; it must not lie.
-      # Absent: clients from before, or not through that proxy
-      header = env['HTTP_X_ROCK_SYNC_VAULT']
-      unauthorized!('vault header mismatch') if header && header != vault_name
+      vault_header!(vault_name)
       @device.vault == vault_name or unauthorized!("vault #{vault_name.inspect} not allowed for #{@device.name}")
+      vault_allowed!(vault_name)
       @vault = Vault.find(vault_name) or unauthorized!("vault #{vault_name.inspect} missing in VAULTS_DIR")
       env['vault_sync.auth'] = "device=#{@device.name} vault=#{@vault.name}"
+    end
+
+    # DEVICE_ONLY routes: the token alone, Basic's vault part ignored. X-Rock-Sync-Vault, when sent, still has to name
+    # the token's vault: else a proxy letting one vault through would let any token reach these
+    def authenticate_token!
+      authenticate_device!
+      vault_header!(@device.vault)
+      vault_allowed!(@device.vault)
+    end
+
+    # ALLOWED_VAULTS: a vault this process doesn't serve is refused like any other, its token too (DEVICE_ONLY routes)
+    def vault_allowed!(vault_name)
+      Config.vault_allowed?(vault_name) or unauthorized!("vault #{vault_name.inspect} not allowed in this process")
+    end
+
+    # X-Rock-Sync-Vault: the vault in the clear, for a proxy in front (Cloudflare) to filter on; it must not lie.
+    # Absent: clients from before, or not through that proxy
+    def vault_header!(vault_name)
+      header = env['HTTP_X_ROCK_SYNC_VAULT']
+      unauthorized!('vault header mismatch') if header && header != vault_name
     end
 
     # The token alone → @device; returns the vault part of the header (unchecked)
@@ -92,7 +120,7 @@ class App < Sinatra::Base
   end
 
   # A one-time code from the admin panel + this device's name → its token (new, or a Reconnect's new secret), the only
-  # time it's shown, with its vault and its name (a taken one got a number). No credentials: the code is them. Wrong,
+  # time it's shown, with its vault and its name (as sent, taken or not). No credentials: the code is them. Wrong,
   # used or expired: the same 401
   post '/pair' do
     content_type :json
@@ -106,11 +134,12 @@ class App < Sinatra::Base
       JSON.generate(token:, vault: detail.vault, name: detail.name)
     when :bad_name then halt 422, JSON.generate(error: detail)
     when :limited then halt 429, JSON.generate(error: 'too many attempts')
-    else unauthorized!('pairing refused')
+    else unauthorized!(detail == :not_allowed ? 'pairing refused: vault not allowed in this process' : 'pairing refused')
     end
   end
 
-  # The token's vault, as a list (plugins from before codes picked from it). Basic with any vault part, "" too
+  # The token's vault, as a list (plugins from before codes picked from it). Basic with any vault part, "" too;
+  # X-Rock-Sync-Vault, if sent, must be the token's vault
   get '/vaults' do
     content_type :json
     JSON.generate(vaults: [@device.vault].select { Vault.find(_1) })
@@ -184,11 +213,20 @@ class App < Sinatra::Base
 
   # Long poll with ?wait=N (s, up to ChangeFeed::MAX_WAIT): answers once the vault's HEAD moves past the client's version
   # (If-None-Match, echoed as received) — or after N seconds, then usually 304. Without If-None-Match: right away.
+  # Over PollSlots' caps (per token, per process): 429 at once, no wait. After a wait the credentials are checked
+  # again: a token revoked (or Reconnected) meanwhile gets the 401, not one more manifest.
   # Format by ?v=: 1 → files { path => [hash, size] }; none (v0, clients from before sizes) → { path => hash }
   get '/manifest' do
-    if params['wait']
-      known = request.env['HTTP_IF_NONE_MATCH'].to_s.delete_prefix('W/').delete('"')
-      @vault.feed.wait(known, params['wait'].to_i) { @vault.version || NO_COMMITS } unless known.empty?
+    known = request.env['HTTP_IF_NONE_MATCH'].to_s.delete_prefix('W/').delete('"')
+    if params['wait'] && !known.empty?
+      waited = PollSlots.hold(@device.id) do
+        @vault.feed.wait(known, params['wait'].to_i) { @vault.version || NO_COMMITS }
+      end
+      unless waited
+        env['vault_sync.auth'] += ' (too many polls)'
+        halt 429, { 'content-type' => 'application/json', 'retry-after' => POLL_RETRY_AFTER }, POLLS_REFUSED
+      end
+      authenticate!
     end
     version, files = BuildManifest.call(@vault)
     etag version || NO_COMMITS # halts with 304 when If-None-Match matches

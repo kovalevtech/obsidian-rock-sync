@@ -36,9 +36,15 @@ The [admin panel](admin.md#device-tokens) issues a one-time, 6-digit code for a 
 
 Logs never contain the `Authorization` header, cookies, request bodies, MCP answers or `POST /pair` answers, and neither tokens nor connection codes are logged at any point. They do contain paths, device and token names, and the vault's name, so treat file names in your logs as private.
 
+With `VERBOSE_HTTP_LOGS` on there's a line for each request and answer, with the request's headers but none that carries credentials (`Authorization`, `Proxy-Authorization`, cookies, Cloudflare Access' `Cf-Access-Client-Id`, `Cf-Access-Client-Secret` and `Cf-Access-Jwt-Assertion`, and any named like a token, key or secret). Answers are logged only where they hold neither file content nor a secret (`GET /vaults`); for everything else only the status. It's meant for debugging, not for production.
+
 ## Transport
 
 The server speaks plain HTTP and expects a proxy or a private network in front of it. Tokens and notes travel in the clear otherwise. See [Deployment](deployment.md#network).
+
+## Exposing the server
+
+Whatever is reachable from the internet should pass a proxy that allows the sync API's and MCP's requests by method and exact path, and nothing else: [Exposing the server](exposing.md) has the rules, a Cloudflare example and checks to run from outside. Behind any proxy, the server refuses a request path that isn't canonical (`//`, `.` or `..` segments, an encoded `/`, `\` or `.`, control characters) with `400` before routing it, so a proxy that reads a path differently can't steer a request past its rules to another part of the server. That is a second line, not a replacement for the allowlist.
 
 ## Notes at rest
 
@@ -46,14 +52,14 @@ The server speaks plain HTTP and expects a proxy or a private network in front o
 
 ## Admin panel
 
-- Off unless `ADMIN_USER`, `ADMIN_PASSWORD` and `SESSION_SECRET` are set.
+- Off unless `admin` is in `ENABLED_APPS`, which then needs `ADMIN_USER`, `ADMIN_PASSWORD` and `SESSION_SECRET`. Run it in a container of its own that nothing public reaches ([Processes](deployment.md#processes)).
 - Login takes a password and, if `ADMIN_TOTP_SECRET` is set, a TOTP code, in one form with one generic error. A code works once. Without TOTP the password alone protects the panel, which is one more reason to keep it private.
 - After 5 failed logins, every login is refused for 60 seconds, doubling with each further failure. This is global and in memory: someone who can reach the page can keep you locked out until you restart the server, which is one more reason to keep it [off the internet](deployment.md#network).
 - The session is an encrypted cookie: `HttpOnly`, `SameSite=Strict`, `Secure`, 12 hours. All forms are protected against CSRF.
 
 ## MCP
 
-Off unless `MCP_ENABLED` is set: without it the endpoint doesn't exist. Whatever a token may not do with a path reads exactly like a path that isn't there, so it can't probe for files outside its grants. Hidden paths (any segment starting with a dot) can never be granted, listed, read or written. Tool calls are limited to 60 a minute per token. A write can't overwrite a version the token hasn't seen, and results never echo file content.
+Off unless `mcp` is in `ENABLED_APPS`: without it the endpoint doesn't exist. Whatever a token may not do with a path reads exactly like a path that isn't there, so it can't probe for files outside its grants. Hidden paths (any segment starting with a dot) can never be granted, listed, read or written. Tool calls are limited to 60 a minute per token. A write can't overwrite a version the token hasn't seen, and results never echo file content.
 
 Whatever you grant ends up in a third party's hands: what Claude reads goes to Anthropic under your account's terms.
 

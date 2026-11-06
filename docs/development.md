@@ -13,7 +13,7 @@ bundle exec rackup   # localhost:9292
 make test
 ```
 
-Out of the box it keeps its data in `backend/tmp/data` and `backend/tmp/db` (gitignored). `make vault NAME=…` creates a vault, `make vault-code VAULT=…` prints a connection code for it and its connection link (the plugin's **Connect**, or curl's `POST /pair`), both without the admin panel.
+It serves the sync API and MCP (`ENABLED_APPS=sync,mcp` in `.env`); for the admin panel too, set its settings and `ENABLED_APPS=sync,mcp,admin` in `.env.local`. Out of the box it keeps its data in `backend/tmp/data` and `backend/tmp/db` (gitignored). `make vault NAME=…` creates a vault, `make vault-code VAULT=…` prints a connection code for it and its connection link (the plugin's **Connect**, or curl's `POST /pair`), both without the admin panel.
 
 ## Plugin
 
@@ -55,10 +55,24 @@ The bump:
 
 1. `make deps test`: the plugin's and the server's tests.
 2. Run workflow only: `make ci-bump`, the bump above. A failing test leaves the version alone. A tag pushed from your machine starts the workflow here, with the version already bumped.
-3. `make release-image`: a check that the tag equals `version` in `manifest.json`, then the image pushed to `ghcr.io/<owner>/obsidian-rock-sync` as `<version>` and `latest`.
+3. `make release-image`: a check that the tag equals `version` in `manifest.json`, then the image pushed to `ghcr.io/<owner>/obsidian-rock-sync` as `<version>` and `latest` (a beta: `<version>` only).
 4. `make deps release-plugin`: the same check, the plugin's build, then a GitHub release with `main.js`, `manifest.json` and `styles.css` from `plugin/dist/`, and notes generated from the commits.
 
 Each is a job of its own, the GitHub release last: if any fails, there's no GitHub release; the image may already be pushed. There are no secrets to set up: the workflow logs in to GHCR with its own `GITHUB_TOKEN`.
+
+### Betas
+
+To try a build on your own server and devices before anyone else gets it:
+
+```sh
+cd plugin
+make beta                # the next patch's beta: 1.0.2-beta.1, then 1.0.2-beta.2, …
+make beta LEVEL=minor    # or of the next minor / major: 1.1.0-beta.1
+```
+
+It works from any branch with no uncommitted changes. The version commit is made in a temporary worktree and stays off every branch; only its tag is pushed. The workflow then runs as for a release, with two differences: the image is pushed as `<version>` only, `latest` stays on the last release, and the GitHub release is marked as a prerelease.
+
+Obsidian offers plugin updates by the `manifest.json` on the default branch, which a beta doesn't change, so no device is offered it. Install it by hand from the prerelease's `main.js`, `manifest.json` and `styles.css`, and pin the server's image to its version. The release itself comes later, as usual: `make patch` (or `minor`, `major`) on `main`.
 
 ### Redoing a failed release
 

@@ -5,12 +5,12 @@ require 'securerandom'
 # reinstalled or lost it); the plugin trades it + a device name for the token (POST /pair). INIT_VAULT_CODE's code
 # (EnvInit) has no expiry: it lives until the vault's first device. MAX_WRONG wrong codes in a row burn every active
 # one, so guessing gets a few tries per code issued (per boot, for INIT_VAULT_CODE's); the worst it does is make the
-# admin issue it again.
+# admin issue it again. A code is read, then used: under the database's lock (DB.exclusively), so no two devices from one
+# code, whichever processes issue and redeem them.
 module Pairings
   TTL = 10 * 60 # s
   MAX_WRONG = 5
   ATTEMPTS = RateLimit.new(limit: 10, period: 60) # calls of redeem a minute, for everyone: there's no one to tell apart
-  LOCK = Mutex.new # a code is read, then used: one process, so no two devices from one code
 
   # A code for a new device token in the vault → [code, expires_at]. ArgumentError: no such vault
   def self.issue(vault, now: Time.now)
@@ -29,7 +29,7 @@ module Pairings
   # INIT_VAULT_CODE, every boot: the code is there, without an expiry, while the vault has no device token (revoked
   # ones count: once used, it's gone for good, a restart doesn't bring it back). code nil: dropped. → :issued | :used | nil
   def self.init(vault, code)
-    LOCK.synchronize do
+    DB.exclusively do
       DB[:pairings].where(expires_at: nil).delete
       next unless code
 
@@ -42,17 +42,19 @@ module Pairings
     end
   end
 
-  # → [:paired, device, token] | [:refused] (wrong, used or expired: the same) | [:limited] | [:bad_name, message].
+  # → [:paired, device, token] | [:refused] (wrong, used or expired: the same) | [:refused, :not_allowed] (a code for a
+  # vault outside ALLOWED_VAULTS: burnt) | [:limited] | [:bad_name, message].
   # The name is only looked at under a good code, and a bad one leaves the code usable. A name other tokens have is
   # fine (it's the commit author, not an identity); a Reconnect code keeps the token's name
   def self.redeem(code, name, now: Time.now)
     return [:limited] unless ATTEMPTS.allow?(:redeem)
 
     code = code.to_s.gsub(/\s/, '')
-    LOCK.synchronize do
+    DB.exclusively do
       purge(now)
       pairing = DB[:pairings].where(code:).first
       next refuse unless pairing
+      next burn(pairing) unless Config.vault_allowed?(DB[:vaults].where(id: pairing[:vault_id]).get(:name))
 
       result = pairing[:device_id] ? rotate(pairing) : create(pairing, name)
       DB[:pairings].where(id: pairing[:id]).delete
@@ -65,7 +67,7 @@ module Pairings
 
   def self.insert(vault_id:, now:, device_id: nil)
     expires_at = now + TTL
-    LOCK.synchronize do
+    DB.exclusively do
       purge(now)
       code = unused_code
       DB[:pairings].insert(code:, vault_id:, device_id:, expires_at: expires_at.utc)
@@ -105,5 +107,11 @@ module Pairings
     DB[:pairings].delete unless DB[:pairings].where(Sequel[:wrong] >= MAX_WRONG).empty?
     [:refused]
   end
-  private_class_method :insert, :create, :rotate, :unused_code, :purge, :refuse
+  # A good code for a vault this process doesn't serve (ALLOWED_VAULTS): used up, refused like a wrong one. Whoever has
+  # it gets nothing here, and the admin issues another for the right server
+  def self.burn(pairing)
+    DB[:pairings].where(id: pairing[:id]).delete
+    [:refused, :not_allowed]
+  end
+  private_class_method :insert, :create, :rotate, :unused_code, :purge, :refuse, :burn
 end

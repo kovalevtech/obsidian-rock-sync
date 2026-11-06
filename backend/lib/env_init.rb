@@ -3,11 +3,14 @@
 # the admin panel did to the vault stands. INIT_VAULT_CODE connects the vault's first device without the admin panel:
 # valid until a device token for the vault exists, then never again (Pairings.init).
 module EnvInit
+  # Under the database's lock: processes booting together on the same data do it one after the other
   def self.call(init)
-    vault(init.vault) if init
-    case Pairings.init(init&.vault, init&.code)
-    when :issued then log "INIT_VAULT_CODE: open for the first device of #{init.vault}"
-    when :used then log "INIT_VAULT_CODE: ignored, #{init.vault} has its devices already"
+    DB.exclusively do
+      vault(init.vault) if init
+      case Pairings.init(init&.vault, init&.code)
+      when :issued then log "INIT_VAULT_CODE: open for the first device of #{init.vault}"
+      when :used then log "INIT_VAULT_CODE: ignored, #{init.vault} has its devices already"
+      end
     end
   end
 

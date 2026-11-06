@@ -3,7 +3,7 @@ import { settings } from './settings.js';
 import { debug } from './log.js';
 import { encodePath, mergeable, syncable } from './paths.js';
 
-// The running sync's token (secretStorage, loaded / saved by Credentials) and this client's X-Rock-Sync-Client;
+// The running sync's token (vault-scoped localStorage, loaded / saved by Credentials) and this client's X-Rock-Sync-Client;
 // endpoint and vault are in settings. onUnauthorized: the server refused them (401) — the plugin pauses sync.
 // onAnswer: the server answered the running sync's credentials (sync status: last successful contact)
 const session = { token: '', client: '', onUnauthorized: () => {}, onAnswer: () => {} };

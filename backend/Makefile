@@ -40,7 +40,8 @@ ghcr-login: ghcr-user
 	test -n "$$token" || { echo 'GHCR_TOKEN not set (environment or .env.local)' >&2; exit 1; }; \
 	printf '%s' "$$token" | docker login ghcr.io -u '$(GHCR_USER)' --password-stdin
 
-# The homelab image (linux/amd64) to GHCR (make ghcr-login first). An uncommitted tree gets a `-dirty` tag
+# The homelab image (linux/amd64) to GHCR (make ghcr-login first). An uncommitted tree gets a `-dirty` tag.
+# NO_LATEST=1 (a beta): the version tag only, `latest` stays on the last release
 push: ghcr-user
 # 	@test -z "$$(git status --porcelain)" || { echo 'Uncommitted changes: commit first' >&2; exit 1; }
-	docker buildx build --platform linux/amd64 $(BUILD_ARGS) -t $(IMAGE):$(VERSION) -t $(IMAGE):latest --push .
+	docker buildx build --platform linux/amd64 $(BUILD_ARGS) -t $(IMAGE):$(VERSION) $(if $(NO_LATEST),,-t $(IMAGE):latest) --push .
