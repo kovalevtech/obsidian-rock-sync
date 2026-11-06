@@ -53,6 +53,8 @@ Every answer has `Cache-Control: no-store`. If your HTTP client keeps its own ca
 | `POST /move/<from>` | Rename a file |
 | `POST /merge/<path>` | Dry run of `PUT`'s merge |
 
+Encode each segment of `<path>` with `encodeURIComponent` or its equivalent. Before anything else, the server answers `400` with an empty body to a request path that isn't canonical: one with `//`, a `.` or `..` segment, `\`, an encoded `/`, `\` or `.` (`%2F`, `%5C`, `%2E`), a control character raw or encoded, or malformed percent-encoding ([why](security.md#exposing-the-server)).
+
 ### `GET /health`
 
 `200 ok` as plain text. Says nothing about vaults or tokens, and isn't logged.

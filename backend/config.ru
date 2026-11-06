@@ -111,6 +111,7 @@ class ZeitwerkReloader
   end
 end
 
+use CanonicalPath # first: a path any part of the stack might read two ways never reaches it
 use ZeitwerkReloader if Config.zeitwerk_reload?
 use LogRequestAndResponse if Config.verbose_http_logs?
 

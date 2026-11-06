@@ -40,6 +40,10 @@ Logs never contain the `Authorization` header, cookies, request bodies, MCP answ
 
 The server speaks plain HTTP and expects a proxy or a private network in front of it. Tokens and notes travel in the clear otherwise. See [Deployment](deployment.md#network).
 
+## Exposing the server
+
+Whatever is reachable from the internet should pass a proxy that allows the sync API's and MCP's requests by method and exact path, and nothing else: [Exposing the server](exposing.md) has the rules, a Cloudflare example and checks to run from outside. Behind any proxy, the server refuses a request path that isn't canonical (`//`, `.` or `..` segments, an encoded `/`, `\` or `.`, control characters) with `400` before routing it, so a proxy that reads a path differently can't steer a request past its rules to another part of the server. That is a second line, not a replacement for the allowlist.
+
 ## Notes at rest
 
 **There's no end-to-end encryption.** The server stores your notes as plain files, and whoever controls the server can read them. If the disk should be protected, encrypt it at the storage layer; the server doesn't need to know.

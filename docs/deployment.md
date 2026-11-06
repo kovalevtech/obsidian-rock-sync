@@ -79,7 +79,7 @@ Tokens and notes travel in the clear unless you add encryption, so the server sh
 
 **Recommended: a private network for everything, and `/mcp` alone in public** if you use Claude. Phones and laptops then sync from anywhere without anything else being exposed.
 
-**The sync API can also be public.** Every request needs a token too long to guess, so this is reasonable if a VPN doesn't suit your devices. The exception is `/pair`, which takes a [short one-time code](security.md#connection-codes): its limits leave a few guesses per code, but anyone can keep cancelling your codes. Keep the admin container private even then: besides the panel itself, its [lockout](security.md#admin-panel) can be abused to lock you out.
+**The sync API can also be public.** Every request needs a token too long to guess, so this is reasonable if a VPN doesn't suit your devices. The exception is `/pair`, which takes a [short one-time code](security.md#connection-codes): its limits leave a few guesses per code, but anyone can keep cancelling your codes. Keep the admin container private even then: besides the panel itself, its [lockout](security.md#admin-panel) can be abused to lock you out. How to expose it safely: [Exposing the server](exposing.md).
 
 ## Reverse proxy
 

@@ -205,13 +205,14 @@ class ProcessesTest < VaultTest
     [vaults['Set-Cookie'] ? cookie_of.call(vaults) : cookie, csrf_of.call(vaults)]
   end
 
-  # The review's way into /admin, sent as is: a process without admin has no Admin to reach
+  # The review's way into /admin, sent as is: refused by CanonicalPath before any app (and a process without admin has no
+  # Admin to reach anyway)
   def test_admin_paths_sent_raw_to_a_sync_process
     sync = start('sync')
     ['/admin/../files/a%2f..%2f..%2flogin', '//admin/login', '/admin//login', '/admin/./login'].each do |path|
       TCPSocket.open('127.0.0.1', sync[:port]) do |socket|
         socket.write("GET #{path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        assert_equal 'HTTP/1.1 401 Unauthorized', socket.gets.chomp, path
+        assert_equal 'HTTP/1.1 400 Bad Request', socket.gets.chomp, path
       end
     end
   end

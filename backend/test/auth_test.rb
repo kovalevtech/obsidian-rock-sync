@@ -81,6 +81,13 @@ class AuthTest < VaultTest
     assert_equal 0, commit_count
   end
 
+  # A method no route has, on a path that has routes: the same 401 without a token
+  def test_unknown_methods_on_known_paths_deny_by_default
+    routes.map(&:last).uniq.product(%w[PATCH OPTIONS]).each do |path, verb|
+      assert_unauthorized(call(verb, path, nil), "#{verb} #{path}")
+    end
+  end
+
   def test_valid_credentials_reach_every_route
     routes.each do |verb, path|
       refute_equal 401, call(verb, path, basic('test', @token)).status, "#{verb} #{path}"

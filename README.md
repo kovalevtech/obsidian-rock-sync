@@ -60,6 +60,7 @@ If you turn on [MCP](docs/mcp.md) on your server, Claude (Anthropic) can read an
 | Page | What it covers |
 |---|---|
 | [Deployment](docs/deployment.md) | How it makes sense to run it: network, proxy, storage, backups, updates |
+| [Exposing the server](docs/exposing.md) | Behind a public proxy: what to allow, a Cloudflare example, checks from outside |
 | [Container](docs/container.md) | The Docker image: every setting, volumes, users, why it won't start |
 | [Plugin](docs/plugin.md) | Using the plugin: conflicts, deletions, first sync, limits |
 | [Admin panel](docs/admin.md) | Managing vaults and tokens in the browser |

@@ -207,15 +207,17 @@ class BootTest < VaultTest
     assert_equal ['0'] * 8, output.scan(/ bytes=(\d+)$/).flatten
   end
 
-  # The review's way into /admin through a proxy allowing /files/: in a process without admin there's no Admin to reach
+  # The review's way into /admin through a proxy allowing /files/: CanonicalPath refuses the non-canonical forms (400)
+  # before any app; the canonical one finds no Admin in a process without admin. (`//admin/login` is sent raw in
+  # processes_test.rb: Rack::MockRequest would read `//admin` as a host)
   def test_admin_paths_reach_nothing_without_admin
-    paths = ['/admin/../files/a%2f..%2f..%2flogin', '//admin/login', '/admin//login', '/admin/./login', '/admin/login']
+    paths = ['/admin/../files/a%2f..%2f..%2flogin', '/admin//login', '/admin/./login', '/admin/login']
     output, code, statuses = boot(admin_env.merge('ENABLED_APPS' => 'sync,mcp'), paths.map { ['GET', _1] })
     assert_equal 0, code, output
-    assert_equal [401] * 5, statuses
+    assert_equal [400, 400, 400, 401], statuses
     output, code, statuses = boot(admin_env.merge('ENABLED_APPS' => 'mcp'), paths.map { ['GET', _1] })
     assert_equal 0, code, output
-    assert_equal [404] * 5, statuses
+    assert_equal [400, 400, 400, 404], statuses
   end
 
   def test_bad_enabled_apps_stop_the_boot
