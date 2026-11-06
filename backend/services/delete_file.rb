@@ -16,9 +16,7 @@ class DeleteFile
       etag = Git.blob_hash(current)
       next [:stale, etag, current, vault.git.last_commit_time(rel)] if if_match != etag
 
-      vault.git.rm(rel)
-      vault.commit("DELETE #{rel}", author:)
-      vault.prune_dirs(File.dirname(full))
+      vault.commit("DELETE #{rel}", remove: [rel], author:)
       [:deleted]
     end
   end

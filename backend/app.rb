@@ -10,7 +10,7 @@ class App < Sinatra::Base
   error StandardError do
     e = env['sinatra.error']
     case e.class.name
-    when 'Vault::Path::BadPath' then [400, e.message]
+    when 'Vault::Path::BadPath', 'Vault::Path::Hidden' then [400, e.message]
     when 'Vault::NotFound', 'Sinatra::NotFound' then 404 # the latter: no such route
     else 500
     end

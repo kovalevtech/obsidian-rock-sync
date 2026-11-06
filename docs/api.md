@@ -36,6 +36,8 @@ git hash-object note.md
 
 File versions travel in an unquoted `ETag`. `Last-Modified` is the time of the last commit touching the file. Paths are relative to the vault and URL-encoded.
 
+A path a vault may not hold gets `400` on every route that takes one, `Destination` included, before anything is read or written: a hidden segment (starting with a dot) other than a folder's `.keep`, an empty, `.` or `..` segment, a control character, a backslash, a leading `~`, a `git~1` segment, a segment over 255 bytes or a path over 1024. The full rule is in [Storage](storage.md#paths).
+
 Every answer has `Cache-Control: no-store`. If your HTTP client keeps its own cache, turn it off or send `Cache-Control: no-cache`: a cached answer looks like an up-to-date file.
 
 ## Endpoints
@@ -108,7 +110,7 @@ Revokes the token it's sent with: the plugin's **Remove**, or a vault connected 
 
 ### `GET /files/<path>`
 
-`200` with the raw bytes, `ETag` and `Last-Modified`. `304` if `If-None-Match` equals the current hash. `404` if there's no such file.
+`200` with the raw bytes, `ETag` and `Last-Modified`. `304` if `If-None-Match` equals the current hash. `404` if there's no such file, `400` for a bad path.
 
 ### `PUT /files/<path>`
 
@@ -150,6 +152,7 @@ my line
 |---|---|
 | `204` | Deleted, or already gone |
 | `412` + current version, `ETag`, `Last-Modified` | Edited since, or no `If-Match`; nothing deleted |
+| `400` | Bad path |
 
 ### `POST /move/<from>`
 
@@ -170,7 +173,7 @@ The same merge as `PUT`, but nothing is ever written. `If-Match` is the base, th
 |---|---|
 | `200` | The clean merge |
 | `409` | Text with conflict markers |
-| `412` / `413` | As for `PUT` |
+| `400` / `412` / `413` | As for `PUT` |
 
 `ETag` and `Last-Modified` describe the current server version.
 

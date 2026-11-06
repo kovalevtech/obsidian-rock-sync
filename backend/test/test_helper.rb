@@ -61,10 +61,7 @@ class VaultTest < Minitest::Test
 
   # A committed version, straight through git (independent of the services under test); returns its blob hash
   def commit_file(path, content)
-    FileUtils.mkdir_p(File.dirname(tree_file(path)))
-    File.binwrite(tree_file(path), content)
-    @vault.git.add(path)
-    @vault.commit("TEST #{path}")
+    @vault.commit("TEST #{path}", write: { path => content })
     blob(content)
   end
 

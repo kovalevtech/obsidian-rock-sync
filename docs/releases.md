@@ -15,3 +15,11 @@ The sync API, MCP and the admin panel are now apps a container serves only when 
 - The admin panel now always shows **Scoped tokens**, since MCP may run in another container.
 - `INIT_VAULT_NAME` and `INIT_VAULT_CODE` are acted on only in a container serving `sync`.
 - The log's `admin disabled` and `MCP disabled` are replaced by one line per start: `vault-sync: serving <apps>`.
+
+### Paths a vault can't hold get `400`
+
+The server now checks every path against one rule ([Storage](storage.md#paths)) before it reads or writes anything. Paths with a hidden segment (`.gitignore`, `.git/…`, `.obsidian/…`) other than a folder's `.keep`, empty / `.` / `..` segments, control characters, a backslash, a leading `~`, a `git~1` segment, a segment over 255 bytes or a path over 1024 bytes get `400` from the sync API, on `GET` and `DELETE` too, and an error from MCP. Before, some of these were written, some failed with `500`, and some left a vault that took no more writes.
+
+- **The plugin isn't affected:** it never syncs hidden paths. A note whose name the rule refuses for another reason (it starts with `~`, say) stays on its device with a grey dot ("Not synced: the last upload failed") and a sync error. Rename it to sync it.
+- **Git no longer looks at the vault's files.** A `.gitignore`, `.gitattributes` or nested `.git` folder inside a vault can't change what's stored or block writes any more, and a failed write leaves the vault as it was.
+- **Check the log after updating.** A vault that already holds refused paths is named at startup, with how to clean it up in [Storage](storage.md#cleaning-up-refused-paths). Nothing is deleted on its own.

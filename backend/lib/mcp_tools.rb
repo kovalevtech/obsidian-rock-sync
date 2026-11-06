@@ -81,9 +81,13 @@ module McpTools
   # The one answer for a path that isn't there, or isn't Claude's to see: the same either way
   def self.not_found(vault, rel) = Refused.new("`#{label(rel)}` not found in #{vault.name}.")
 
-  # A vault-relative path from what Claude sent (a leading / tolerated); BadPath → Refused
+  # A vault-relative path from what Claude sent (slashes around it tolerated); refused by Vault::Path → Refused: a
+  # hidden one as not found (MCP never sees hidden paths), the rest as a bad path
   def self.relative(vault, path)
-    vault.normalize(path.sub(%r{\A/+}, ''))
+    rel = path.gsub(%r{\A/+|/+\z}, '')
+    vault.normalize(rel)
+  rescue Vault::Path::Hidden
+    raise not_found(vault, rel)
   rescue Vault::Path::BadPath
     raise Refused, "`#{path}` isn't a path inside the vault: use one like `Inbox/Note.md`."
   end
@@ -93,7 +97,7 @@ module McpTools
   def self.file(token, vault_name, path, *modes)
     vault = vault(token, vault_name)
     rel = relative(vault, path)
-    rel += '.md' if File.extname(rel).empty?
+    rel = relative(vault, "#{rel}.md") if File.extname(rel).empty? # checked again: it may be too long now
     raise not_found(vault, rel) unless modes.all? { Access.allowed?(token.grants, vault.name, rel, _1) }
     raise Refused, "`#{rel}` is a folder: name a file inside it." if File.directory?(vault.file(rel))
 

@@ -1,5 +1,3 @@
-require 'fileutils'
-
 # POST /move: renames a file in one commit `RENAME <from> → <to>` (git log --follow keeps its history). Paths only, no
 # If-Match: whatever version is at from moves; the client reconciles content afterwards with a normal PUT.
 # A folder's .keep moving = the folder renamed: grants on it follow (Grants.follow_move).
@@ -16,12 +14,10 @@ class MoveFile
       raise Vault::NotFound, from unless File.file?(src_full)
       next [:exists] if File.exist?(dst_full)
 
-      FileUtils.mkdir_p(File.dirname(dst_full))
-      vault.git.mv(src, dst)
-      vault.commit("RENAME #{src} → #{dst}", author:)
-      vault.prune_dirs(File.dirname(src_full))
+      content = File.binread(src_full)
+      vault.commit("RENAME #{src} → #{dst}", write: { dst => content }, remove: [src], author:)
       follow_grants(vault, src, dst)
-      [:moved, Git.blob_hash(File.binread(dst_full))]
+      [:moved, Git.blob_hash(content)]
     end
   end
 

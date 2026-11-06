@@ -1,5 +1,3 @@
-require 'fileutils'
-
 # PUT /files: writes a file and commits it (`PUT <path>`, or `MERGE <path>` for a merged result).
 # if_match: the version the client edited; if_none_match: '*' = create only; mergeable: see MergeVersions;
 # author: Vault::Author of the commit; action: the commit's verb instead of PUT (AppendFile: APPEND); keeps: the file's
@@ -39,25 +37,16 @@ class WriteFile
         next [:merged, etag, content] if etag == current_etag # nothing new, e.g. a retried merge
       end
 
-      FileUtils.mkdir_p(File.dirname(full))
-      add_keeps(vault, rel) if keeps
-      File.binwrite(full, content)
-      vault.git.add(rel)
-      vault.commit("#{merged ? 'MERGE' : action} #{rel}", author:)
+      write = keeps ? missing_keeps(vault, rel).to_h { [_1, ''] } : {}
+      vault.commit("#{merged ? 'MERGE' : action} #{rel}", write: write.merge(rel => content), author:)
       merged ? [:merged, etag, content] : [:written, etag]
     end
   end
 
-  # Every folder above rel without a .keep gets one, staged for the commit at hand
-  def self.add_keeps(vault, rel)
+  # The .keep of every folder above rel that has none, for the commit at hand
+  def self.missing_keeps(vault, rel)
     parts = rel.split('/')[0...-1]
-    parts.each_index.map { parts[.._1].join('/') }.each do |dir|
-      keep = "#{dir}/.keep"
-      next if File.exist?(vault.file(keep))
-
-      File.binwrite(vault.file(keep), '')
-      vault.git.add(keep)
-    end
+    parts.each_index.map { "#{parts[.._1].join('/')}/.keep" }.reject { File.exist?(vault.file(_1)) }
   end
-  private_class_method :add_keeps
+  private_class_method :missing_keeps
 end

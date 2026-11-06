@@ -534,8 +534,8 @@ class McpTest < VaultTest
     { 'Journal/old-device.md' => ['pixel', 'pixel@vault-sync', 'plugin=0.1.0'], 'Journal/old-mcp.md' => ['claude-old', 'claude-old@vault-sync', 'mcp'],
       'Journal/old-bare.md' => ['laptop', 'laptop@vault-sync', nil] }.each do |path, (name, email, client)|
       File.write(tree_file(path), "#{path}\n")
-      @vault.git.add(path)
-      @vault.git.commit("PUT #{path}#{"\n\nClient: #{client}" if client}", author: [name, email])
+      @vault.git.commit("PUT #{path}#{"\n\nClient: #{client}" if client}", { path => @vault.git.hash_object("#{path}\n") },
+                        author: [name, email])
     end
     commit_file('Journal/server.md', "s\n")
 
