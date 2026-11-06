@@ -42,6 +42,23 @@ class Config
     APPS & apps
   end
 
+  # ALLOWED_VAULTS: the vaults this process's sync API serves (App: every route, /pair's codes), comma-separated; unset
+  # or empty → all. A process others reach (behind a proxy) lists only theirs. A name that can't be a vault's → raises;
+  # one that isn't in the database (yet) is only logged at boot. MCP isn't limited by it: its tokens' grants are
+  def self.allowed_vaults
+    value = ENV['ALLOWED_VAULTS'].to_s
+    return if value.strip.empty?
+
+    names = value.split(',', -1).map(&:strip)
+    unless names.all? { _1.match?(Vault::NAME) }
+      raise EnvValueInvalid, 'ALLOWED_VAULTS must list vault names ([a-z0-9-], at most 64), comma-separated'
+    end
+
+    names.uniq
+  end
+
+  def self.vault_allowed?(name) = allowed_vaults.then { _1.nil? || _1.include?(name) }
+
   def self.zeitwerk_reload?
     %w[true 1].include? ENV['ZEITWERK_RELOAD'].to_s
   end

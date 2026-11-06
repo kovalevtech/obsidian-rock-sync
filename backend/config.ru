@@ -4,7 +4,8 @@ $stdout.sync = true # logs go to stdout; in a container that isn't a TTY, unsync
 
 # Boot: one log line and exit 1 when ENABLED_APPS is invalid (or MCP_ENABLED still set), DB_DIR or VAULTS_DIR is
 # missing (not mounted), a vault in the database has no repo in VAULTS_DIR (its storage not mounted), admin is enabled
-# without its env, or the admin env / INIT_* is partial / invalid.
+# without its env, the admin env / INIT_* is partial / invalid, ALLOWED_VAULTS is invalid or, with sync, leaves out
+# INIT_VAULT_NAME.
 # The database file itself is created and migrated; neither directory ever is. Then, where sync runs, what INIT_* asks
 # for, if it's missing: its code is redeemed through /pair, and a process that can't redeem it shouldn't reset its
 # wrong guesses with a restart
@@ -16,6 +17,10 @@ begin
     admin = Config.admin or raise Config::EnvValueNotDefined, 'ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET'
   end
   init = Config.init
+  allowed = Config.allowed_vaults
+  if apps.include?('sync') && init && allowed && !allowed.include?(init.vault)
+    raise Config::EnvValueInvalid, 'INIT_VAULT_NAME must be one of ALLOWED_VAULTS'
+  end
   EnvInit.call(init) if apps.include?('sync')
 rescue StandardError => e
   abort "vault-sync: not starting: #{e.message}"
@@ -123,6 +128,15 @@ use ZeitwerkReloader if Config.zeitwerk_reload?
 use LogRequestAndResponse if Config.verbose_http_logs?
 
 puts "vault-sync: serving #{apps.join(', ')}"
+
+# ALLOWED_VAULTS: said once, so a process serving fewer vaults than meant (or a typo) shows in the log
+if allowed && apps.include?('sync')
+  puts "vault-sync: sync allowed for #{allowed.join(', ')} only"
+  unknown = allowed - Vault.names
+  puts "vault-sync: ALLOWED_VAULTS: no vault #{unknown.join(', ')}" if unknown.any?
+elsif allowed
+  puts 'vault-sync: ALLOWED_VAULTS set, sync not enabled'
+end
 
 # Claude's connector: its own auth (a Bearer token), outside App's; not there at all unless enabled
 if apps.include?('mcp')

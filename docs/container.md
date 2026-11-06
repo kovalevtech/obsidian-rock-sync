@@ -31,6 +31,7 @@ For more devices and vaults, use the [admin panel](admin.md). There are no comma
 | `DB_DIR` | `/db` | The database's directory |
 | `PORT` | `9292` | The port inside the container |
 | `ENABLED_APPS` | `sync` | What this container serves, comma-separated: `sync` (the sync API), `mcp` (the [MCP](mcp.md) endpoint), `admin` (the [admin panel](admin.md#turning-it-on)). See [Processes](deployment.md#processes) |
+| `ALLOWED_VAULTS` | all | The vaults this container's sync API serves, comma-separated (`notes`). Other vaults' device tokens get `401`, their connection codes are refused and used up. For a container others reach ([Exposing](exposing.md#what-to-expose)). MCP isn't limited by it: its tokens' grants are |
 | `MAX_FILE_SIZE` | `104857600` | Largest request body in bytes (100 MB) |
 | `MCP_MAX_WRITE` | `1048576` | The most one MCP call may write or read, in bytes (1 MB) |
 | `MCP_BASE_URL` | | The origin Claude reaches the server at, for a new token's MCP URL in the admin panel. Empty: `PUBLIC_URL` |
@@ -75,6 +76,8 @@ A failed start is one line in the log and exit code 1. Secrets are named, never 
 | `vault <name> missing: no /vaults/<name>/repo.git` | The database knows a vault that isn't there: the wrong or an empty volume is mounted at `/vaults` |
 | `ENABLED_APPS must list one or more of sync, mcp, admin, comma-separated` | Fix the list; unset means `sync` |
 | `MCP_ENABLED is gone: list mcp in ENABLED_APPS instead` | Remove `MCP_ENABLED`, add `mcp` to `ENABLED_APPS` ([Releases](releases.md)) |
+| `ALLOWED_VAULTS must list vault names ([a-z0-9-], at most 64), comma-separated` | Fix the list; empty means all vaults |
+| `INIT_VAULT_NAME must be one of ALLOWED_VAULTS` | Add the vault to `ALLOWED_VAULTS`, or set `INIT_VAULT_NAME` where that vault is served |
 | ``Environment variable `<names>` must be defined.`` | Set the admin settings where `admin` is enabled, or `INIT_VAULT_NAME` for a code |
 | `ADMIN_TOTP_SECRET must be base32, at least 128 bits` | [Generate one](admin.md#turning-it-on) |
 | `SESSION_SECRET must be at least 64 bytes` | [Generate one](admin.md#turning-it-on) |

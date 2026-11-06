@@ -331,4 +331,22 @@ class AuthTest < VaultTest
     assert_equal 304, res.status
     assert_operator took, :>=, 0.9
   end
+
+  # ALLOWED_VAULTS: a vault this process doesn't serve is refused on every route, DEVICE_ONLY ones too, like a wrong
+  # token; the vaults it lists work as before
+  def test_allowed_vaults
+    ENV['ALLOWED_VAULTS'] = 'other, notes'
+    routes.each do |verb, path|
+      assert_unauthorized(call(verb, path, basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => 'test'), "#{verb} #{path}")
+    end
+    assert_equal 'unauthorized: vault "test" not allowed in this process', last_request.env['vault_sync.auth']
+    assert_equal 0, commit_count
+    assert Devices.authenticate(@token).first, 'DELETE /token refused'
+    assert_equal 200, call('GET', '/manifest', basic('other', @other_token)).status
+    res = call('GET', '/vaults', basic('', @other_token))
+    assert_equal [200, { 'vaults' => ['other'] }], [res.status, JSON.parse(res.body)]
+  ensure
+    ENV['ALLOWED_VAULTS'] = ''
+  end
+
 end

@@ -16,6 +16,10 @@ The sync API, MCP and the admin panel are now apps a container serves only when 
 - `INIT_VAULT_NAME` and `INIT_VAULT_CODE` are acted on only in a container serving `sync`.
 - The log's `admin disabled` and `MCP disabled` are replaced by one line per start: `vault-sync: serving <apps>`.
 
+### `ALLOWED_VAULTS`: a server process serves only the vaults you list
+
+New, optional: `ALLOWED_VAULTS=notes` (comma-separated) makes a container's sync API refuse every other vault: their device tokens get `401` on every route, their connection codes are refused and used up. Unset or empty: all vaults, as before. For the container behind a proxy ([Exposing](exposing.md#what-to-expose)). MCP isn't limited by it. The log says `sync allowed for <vaults> only` at start, and names a listed vault the database doesn't have. With `INIT_VAULT_NAME` outside the list the server refuses to start.
+
 ### Paths a vault can't hold get `400`
 
 The server now checks every path against one rule ([Storage](storage.md#paths)) before it reads or writes anything. Paths with a hidden segment (`.gitignore`, `.git/…`, `.obsidian/…`) other than a folder's `.keep`, empty / `.` / `..` segments, control characters, a backslash, a leading `~`, a `git~1` segment, a segment over 255 bytes or a path over 1024 bytes get `400` from the sync API, on `GET` and `DELETE` too, and an error from MCP. Before, some of these were written, some failed with `500`, and some left a vault that took no more writes.

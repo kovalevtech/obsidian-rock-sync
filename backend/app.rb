@@ -56,6 +56,7 @@ class App < Sinatra::Base
       vault_name = authenticate_device!
       vault_header!(vault_name)
       @device.vault == vault_name or unauthorized!("vault #{vault_name.inspect} not allowed for #{@device.name}")
+      vault_allowed!(vault_name)
       @vault = Vault.find(vault_name) or unauthorized!("vault #{vault_name.inspect} missing in VAULTS_DIR")
       env['vault_sync.auth'] = "device=#{@device.name} vault=#{@vault.name}"
     end
@@ -65,6 +66,12 @@ class App < Sinatra::Base
     def authenticate_token!
       authenticate_device!
       vault_header!(@device.vault)
+      vault_allowed!(@device.vault)
+    end
+
+    # ALLOWED_VAULTS: a vault this process doesn't serve is refused like any other, its token too (DEVICE_ONLY routes)
+    def vault_allowed!(vault_name)
+      Config.vault_allowed?(vault_name) or unauthorized!("vault #{vault_name.inspect} not allowed in this process")
     end
 
     # X-Rock-Sync-Vault: the vault in the clear, for a proxy in front (Cloudflare) to filter on; it must not lie.
@@ -127,7 +134,7 @@ class App < Sinatra::Base
       JSON.generate(token:, vault: detail.vault, name: detail.name)
     when :bad_name then halt 422, JSON.generate(error: detail)
     when :limited then halt 429, JSON.generate(error: 'too many attempts')
-    else unauthorized!('pairing refused')
+    else unauthorized!(detail == :not_allowed ? 'pairing refused: vault not allowed in this process' : 'pairing refused')
     end
   end
 

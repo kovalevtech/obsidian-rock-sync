@@ -8,7 +8,7 @@ class BootTest < VaultTest
   ADMIN_ENV = Config::ADMIN_ENV.to_h { [_1, nil] }
   INIT_ENV = Config::INIT_ENV.to_h { [_1, nil] }
   # Unset: ENABLED_APPS' default (sync)
-  APPS_ENV = { 'ENABLED_APPS' => nil, 'MCP_ENABLED' => nil }.freeze
+  APPS_ENV = { 'ENABLED_APPS' => nil, 'MCP_ENABLED' => nil, 'ALLOWED_VAULTS' => nil }.freeze
 
   # Boots config.ru, then sends each request (method, path — as is, `..` and all —, Basic credentials): [output, exit
   # status, statuses]. Each request's line: `status=<code> bytes=<body size>`
@@ -321,4 +321,52 @@ class BootTest < VaultTest
     assert_equal 1, code
     assert_includes output, 'ADMIN_TOTP_SECRET must be base32, at least 128 bits'
   end
+
+  def test_bad_allowed_vaults_stop_the_boot
+    ['Test', 'test,', 'test,,other', 'test;other', ' , ', '../x', 'a' * 65].each do |value|
+      output, code, = boot('ALLOWED_VAULTS' => value)
+      assert_equal 1, code, value
+      assert_equal "vault-sync: not starting: ALLOWED_VAULTS must list vault names ([a-z0-9-], at most 64), comma-separated\n",
+                   output
+    end
+  end
+
+  # Said at boot, a name the database doesn't know too (a typo, or a vault the admin makes later)
+  def test_allowed_vaults
+    Vault.create('other')
+    other = add_token('other-device', 'other')
+    output, code, statuses = boot({ 'ALLOWED_VAULTS' => 'other, nope' },
+                                  [['GET', '/manifest', "test:#{@token}"], ['GET', '/manifest', "other:#{other}"]])
+    assert_equal 0, code, output
+    assert_includes output, "vault-sync: sync allowed for other, nope only\n"
+    assert_includes output, "vault-sync: ALLOWED_VAULTS: no vault nope\n"
+    assert_equal [401, 200], statuses
+
+    ['', ' '].each do |all|
+      output, code, statuses = boot({ 'ALLOWED_VAULTS' => all }, [['GET', '/manifest', "test:#{@token}"]])
+      assert_equal [0, [200]], [code, statuses], output
+      refute_includes output, 'allowed'
+    end
+  end
+
+  def test_allowed_vaults_without_sync
+    output, code, = boot('ENABLED_APPS' => 'mcp', 'ALLOWED_VAULTS' => 'other')
+    assert_equal 0, code, output
+    assert_includes output, "vault-sync: ALLOWED_VAULTS set, sync not enabled\n"
+  end
+
+  # A first device this process could never connect: a contradiction, not a vault to create
+  def test_init_vault_must_be_allowed
+    output, code, = boot('INIT_VAULT_NAME' => 'notes', 'INIT_VAULT_CODE' => INIT_CODE, 'ALLOWED_VAULTS' => 'test')
+    assert_equal 1, code
+    assert_equal "vault-sync: not starting: INIT_VAULT_NAME must be one of ALLOWED_VAULTS\n", output
+    refute Dir.exist?(File.join(@vaults_dir, 'notes'))
+    assert_empty DB[:pairings]
+
+    output, code, = boot('INIT_VAULT_NAME' => 'notes', 'ALLOWED_VAULTS' => 'test, notes')
+    assert_equal 0, code, output
+    output, code, = boot('ENABLED_APPS' => 'mcp', 'INIT_VAULT_NAME' => 'other', 'ALLOWED_VAULTS' => 'test')
+    assert_equal 0, code, output
+  end
+
 end

@@ -208,4 +208,30 @@ class PairingTest < VaultTest
     refute_includes out, code
     refute_includes out, JSON.parse(res.body).fetch('token')
   end
+
+  # ALLOWED_VAULTS: a good code for a vault this process doesn't serve is used up and refused like a wrong one (a
+  # Reconnect's too: the old token keeps working); codes for the vaults it serves, and the wrong-code count, untouched
+  def test_a_code_for_a_vault_not_allowed_here_is_burnt
+    Vault.create('other')
+    code = issue
+    reconnect, = Pairings.reconnect(id_of('test-device'))
+    kept = issue('other')
+    ENV['ALLOWED_VAULTS'] = 'other'
+    [code, reconnect].each do |burnt|
+      res = pair(burnt)
+      assert_equal [401, App::UNAUTHORIZED], [res.status, res.body]
+      assert_equal 'unauthorized: pairing refused: vault not allowed in this process', last_request.env['vault_sync.auth']
+    end
+    assert_equal [kept], DB[:pairings].select_map(:code)
+    assert_equal 0, DB[:pairings].get(:wrong)
+    assert_equal 1, DB[:devices].count
+    assert Devices.authenticate(@token).first
+
+    ENV['ALLOWED_VAULTS'] = ''
+    assert_equal 401, pair(code).status, 'gone for every process'
+    assert_equal 200, pair(kept).status
+  ensure
+    ENV['ALLOWED_VAULTS'] = ''
+  end
+
 end

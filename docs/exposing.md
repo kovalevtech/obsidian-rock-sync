@@ -7,6 +7,7 @@ The examples use `sync.example.com` for the sync API, `mcp.example.com` for MCP 
 ## What to expose
 
 - **Only a process without the admin panel.** Run the public-facing server with `admin` left out of [`ENABLED_APPS`](container.md), and the admin panel in a process of its own that only your private network reaches. The admin panel never goes through the proxy.
+- **Only the vaults you expose.** Set [`ALLOWED_VAULTS`](container.md) on the public-facing server to those vaults (`ALLOWED_VAULTS=notes`). It refuses every other vault's tokens and connection codes whatever reaches it, so a proxy rule that lets too much through still gets no further than these vaults. It's the server's side of the `X-Rock-Sync-Vault` rule below; keep both. Vaults you sync only over your private network go to a container of their own without it, or without the proxy.
 - **One hostname per exposed app:** one for the sync API, one for MCP if you use it. Each hostname then gets a rule that allows that app's requests and nothing else.
 - **The origin reachable only through the proxy.** If anything can reach the server directly, the proxy's rules are only advice. Use a tunnel, where the server connects out to the proxy and accepts no inbound connections, or a firewall that admits only the proxy.
 
@@ -153,6 +154,7 @@ code -X POST "$S/mcp"                                                  # MCP on 
 Refused by the server (401):
 
 ```sh
+code "$S/manifest?v=1" -u "work:$OTHER" -H 'X-Rock-Sync-Vault: work'   # not in ALLOWED_VAULTS, even past the proxy's rule
 code "$S/manifest?v=1" -u "notes:$OTHER" -H 'X-Rock-Sync-Vault: notes'  # another vault's token
 code "$S/manifest?v=1" -u "work:$T" -H 'X-Rock-Sync-Vault: notes'     # header and credentials disagree
 code -X POST "$M/mcp"                                                   # no token

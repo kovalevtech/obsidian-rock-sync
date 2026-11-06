@@ -42,7 +42,8 @@ module Pairings
     end
   end
 
-  # → [:paired, device, token] | [:refused] (wrong, used or expired: the same) | [:limited] | [:bad_name, message].
+  # → [:paired, device, token] | [:refused] (wrong, used or expired: the same) | [:refused, :not_allowed] (a code for a
+  # vault outside ALLOWED_VAULTS: burnt) | [:limited] | [:bad_name, message].
   # The name is only looked at under a good code, and a bad one leaves the code usable. A name other tokens have is
   # fine (it's the commit author, not an identity); a Reconnect code keeps the token's name
   def self.redeem(code, name, now: Time.now)
@@ -53,6 +54,7 @@ module Pairings
       purge(now)
       pairing = DB[:pairings].where(code:).first
       next refuse unless pairing
+      next burn(pairing) unless Config.vault_allowed?(DB[:vaults].where(id: pairing[:vault_id]).get(:name))
 
       result = pairing[:device_id] ? rotate(pairing) : create(pairing, name)
       DB[:pairings].where(id: pairing[:id]).delete
@@ -105,5 +107,11 @@ module Pairings
     DB[:pairings].delete unless DB[:pairings].where(Sequel[:wrong] >= MAX_WRONG).empty?
     [:refused]
   end
-  private_class_method :insert, :create, :rotate, :unused_code, :purge, :refuse
+  # A good code for a vault this process doesn't serve (ALLOWED_VAULTS): used up, refused like a wrong one. Whoever has
+  # it gets nothing here, and the admin issues another for the right server
+  def self.burn(pairing)
+    DB[:pairings].where(id: pairing[:id]).delete
+    [:refused, :not_allowed]
+  end
+  private_class_method :insert, :create, :rotate, :unused_code, :purge, :refuse, :burn
 end

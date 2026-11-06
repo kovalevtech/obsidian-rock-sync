@@ -20,6 +20,8 @@ ENV['PUBLIC_URL'] = 'https://notes.example.com'
 # unset: a developer's .env.local with the old MCP_ENABLED would stop every boot
 ENV['ENABLED_APPS'] = 'sync,mcp,admin'
 ENV['MCP_ENABLED'] = ''
+# Every vault, whatever the developer's .env.local says; tests of ALLOWED_VAULTS set it themselves
+ENV['ALLOWED_VAULTS'] = ''
 
 require_relative '../app'
 require 'minitest/autorun'

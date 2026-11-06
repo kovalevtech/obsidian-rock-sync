@@ -600,4 +600,14 @@ class McpTest < VaultTest
     assert_includes out, 'mcp auth failed'
     assert_includes errors.string, 'POST /mcp '
   end
+
+  # ALLOWED_VAULTS is the sync API's: MCP goes by its tokens' grants alone
+  def test_allowed_vaults_dont_limit_mcp
+    ENV['ALLOWED_VAULTS'] = 'other'
+    assert_equal GRANTS.size, ok('list_access').size
+    ok('write_file', path: 'Inbox/allowed', content: 'x')
+  ensure
+    ENV['ALLOWED_VAULTS'] = ''
+  end
+
 end
