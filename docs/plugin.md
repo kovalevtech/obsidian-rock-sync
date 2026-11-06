@@ -6,7 +6,7 @@ Rock Sync keeps an Obsidian vault in sync with [your server](deployment.md). It 
 
 In Obsidian: **Settings → Community plugins → Browse**, find **Rock Sync**, install and enable it. Obsidian offers its updates like any other plugin's.
 
-If it isn't listed yet, install it by hand: download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/kovalevtech/obsidian-vault-sync/releases/latest) into `<vault>/.obsidian/plugins/rock-sync/`, then enable it in Community plugins.
+If it isn't listed yet, install it by hand: download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/kovalevtech/obsidian-rock-sync/releases/latest) into `<vault>/.obsidian/plugins/rock-sync/`, then enable it in Community plugins. Each file carries a build provenance attestation: `gh attestation verify main.js --repo kovalevtech/obsidian-rock-sync` checks that it was built by the release workflow from this repository.
 
 ## Connecting
 

@@ -56,7 +56,7 @@ The bump:
 1. `make deps test`: the plugin's and the server's tests.
 2. Run workflow only: `make ci-bump`, the bump above. A failing test leaves the version alone. A tag pushed from your machine starts the workflow here, with the version already bumped.
 3. `make release-image`: a check that the tag equals `version` in `manifest.json`, then the image pushed to `ghcr.io/<owner>/obsidian-rock-sync` as `<version>` and `latest` (a beta: `<version>` only).
-4. `make deps release-plugin`: the same check, the plugin's build, then a GitHub release with `main.js`, `manifest.json` and `styles.css` from `plugin/dist/`, and notes generated from the commits.
+4. `make deps check-tag build`: the same check and the plugin's build. Then [build provenance attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds) for `main.js`, `manifest.json` and `styles.css` in `plugin/dist/`, and `make release-plugin`: a GitHub release with those very files, not built again, and notes generated from the commits.
 
 Each is a job of its own, the GitHub release last: if any fails, there's no GitHub release; the image may already be pushed. There are no secrets to set up: the workflow logs in to GHCR with its own `GITHUB_TOKEN`.
 
