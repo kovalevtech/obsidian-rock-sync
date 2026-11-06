@@ -44,6 +44,10 @@ class App < Sinatra::Base
     # a revoked token. The reason goes to the log only (env['vault_sync.auth'], config.ru)
     def authenticate!
       vault_name = authenticate_device!
+      # X-Rock-Sync-Vault: Basic's vault in the clear, for a proxy in front (Cloudflare) to filter on; it must not lie.
+      # Absent: clients from before, or not through that proxy
+      header = env['HTTP_X_ROCK_SYNC_VAULT']
+      unauthorized!('vault header mismatch') if header && header != vault_name
       @device.vault == vault_name or unauthorized!("vault #{vault_name.inspect} not allowed for #{@device.name}")
       @vault = Vault.find(vault_name) or unauthorized!("vault #{vault_name.inspect} missing in VAULTS_DIR")
       env['vault_sync.auth'] = "device=#{@device.name} vault=#{@vault.name}"

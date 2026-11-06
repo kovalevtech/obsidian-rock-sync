@@ -24,6 +24,8 @@ There is no `WWW-Authenticate` header, because a browser would pop up a login di
 
 An optional `X-Rock-Sync-Client: plugin=1.0.0; obsidian=1.8.7; platform=macos` header ends up in the commit's `Client:` trailer (printable ASCII, at most 200 characters).
 
+The plugin also sends `X-Rock-Sync-Vault: <vault>`, the vault in the clear, whenever it has one. A proxy in front can't read Basic, but it can let through only some vaults' requests by this header. The header is optional. When it is there, it must equal Basic's vault exactly, else the request gets the same 401. `/vaults` and `/token` ignore it, as they ignore Basic's vault part. On its own it protects nothing, since the client sets it. Combined with a proxy rule, another device's leaked token can't reach any vault from outside except the ones the rule allows.
+
 ## Versions
 
 A file's version is its git blob hash, `sha1("blob <size>\0" + content)`, computed over the raw bytes:

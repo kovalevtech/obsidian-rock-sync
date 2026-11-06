@@ -66,11 +66,17 @@ class AuthTest < VaultTest
       'vault not in the database' => basic('missing', @token),
       'no vault' => basic('', @token)
     }
+    # X-Rock-Sync-Vault naming the token's own vault opens nothing by itself
+    headers = { 'no vault header' => {}, 'vault header' => { 'HTTP_X_ROCK_SYNC_VAULT' => 'test' } }
     routes.each do |verb, path|
-      denied.each { |why, header| assert_unauthorized(call(verb, path, header), "#{verb} #{path}: #{why}") }
+      denied.to_a.product(headers.to_a).each do |(why, header), (how, env)|
+        assert_unauthorized(call(verb, path, header, env), "#{verb} #{path}: #{why}, #{how}")
+      end
     end
     vault_routes.each do |verb, path|
       wrong_vault.each { |why, header| assert_unauthorized(call(verb, path, header), "#{verb} #{path}: #{why}") }
+      res = call(verb, path, basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => 'other')
+      assert_unauthorized(res, "#{verb} #{path}: vault header mismatch")
     end
     assert_equal 0, commit_count
   end
@@ -78,6 +84,35 @@ class AuthTest < VaultTest
   def test_valid_credentials_reach_every_route
     routes.each do |verb, path|
       refute_equal 401, call(verb, path, basic('test', @token)).status, "#{verb} #{path}"
+    end
+  end
+
+  # X-Rock-Sync-Vault: Basic's vault in the clear (a proxy filters by it); it must equal Basic's, else the usual 401
+  def test_vault_header_equal_to_basics_vault
+    assert_equal 200, call('GET', '/manifest', basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => 'test').status
+  end
+
+  def test_vault_header_unequal_to_basics_vault
+    ok = call('GET', '/manifest', basic('test', 'x' * 43))
+    res = call('GET', '/manifest', basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => 'other')
+    assert_unauthorized(res, 'mismatch')
+    assert_equal [ok.status, ok.headers.to_h, ok.body], [res.status, res.headers.to_h, res.body]
+    assert_equal 'unauthorized: vault header mismatch', last_request.env['vault_sync.auth']
+    # exact: no case folding, no trimming
+    ['TEST', ' test', 'test ', ''].each do |header|
+      assert_unauthorized(call('GET', '/manifest', basic('test', @token), 'HTTP_X_ROCK_SYNC_VAULT' => header), header.inspect)
+    end
+  end
+
+  def test_no_vault_header_as_before
+    assert_equal 200, call('GET', '/manifest', basic('test', @token)).status
+  end
+
+  # DEVICE_ONLY routes ignore the header, like Basic's vault part
+  def test_vaults_ignores_the_vault_header
+    [nil, '', 'test', 'other', 'missing'].each do |header|
+      env = header ? { 'HTTP_X_ROCK_SYNC_VAULT' => header } : {}
+      assert_equal 200, call('GET', '/vaults', basic('', @token), env).status, header.inspect
     end
   end
 

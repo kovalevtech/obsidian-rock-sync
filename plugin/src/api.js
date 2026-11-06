@@ -21,8 +21,11 @@ const base64 = (text) => btoa(String.fromCharCode(...new TextEncoder().encode(te
 // Every request carries them: vault + token as HTTP Basic, the client's software (never the device: that's the token).
 // no-cache: requestUrl on desktop goes through Chromium's HTTP cache, which would answer with a version it holds, the
 // server not asked (the server's no-store keeps new answers out of it; this skips what an older server's left there)
+// X-Rock-Sync-Vault: Basic's vault in the clear, for a proxy in front (Cloudflare) that filters by it; the server
+// refuses it when it differs from Basic's. Not for an empty vault (GET /vaults)
 const authHeaders = ({ vault, token }) => ({
   Authorization: `Basic ${base64(`${vault}:${token}`)}`,
+  ...(vault ? { 'X-Rock-Sync-Vault': vault } : {}),
   'X-Rock-Sync-Client': session.client,
   'Cache-Control': 'no-cache',
 });
