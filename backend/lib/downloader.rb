@@ -87,7 +87,7 @@ class Downloader
     uri.host = uri.host.downcase.chomp('.')
     return if allowed.call(uri.host)
 
-    raise Refused, "`#{uri.host}` isn't on the user's list of download hosts (the admin panel, Scoped tokens): ask " \
+    raise Refused, "`#{uri.host}` isn't on the user's list of download hosts (the admin panel, Download hosts): ask " \
                    'the user to add it, or download from a host on the list.'
   end
 

@@ -194,7 +194,7 @@ class McpTest < VaultTest
 
   def test_tools_list
     tools = JSON.parse(rpc('tools/list').body).dig('result', 'tools')
-    assert_equal %w[append_file delete_file list_access list_folder read_file write_file], tools.map { _1['name'] }.sort
+    assert_equal %w[append_file delete_file download_file list_access list_folder read_file write_file], tools.map { _1['name'] }.sort
     tools.each { assert_includes _1.dig('inputSchema', 'properties').keys, 'vault', _1['name'] unless _1['name'] == 'list_access' }
   end
 
@@ -582,21 +582,22 @@ class McpTest < VaultTest
 
   def tool_names = JSON.parse(rpc('tools/list').body).dig('result', 'tools').map { _1['name'] }
 
-  # No hosts on the admin's list: no tool, and nothing about downloads in the instructions
-  def test_download_file_only_with_hosts
-    refute_includes tool_names, 'download_file'
+  # Always listed. No hosts on the admin's list: the instructions and the tool say so, nothing is fetched
+  def test_download_file_without_hosts
+    assert_includes tool_names, 'download_file'
     instructions = -> { JSON.parse(rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }).body).dig('result', 'instructions') }
-    refute_includes instructions.call, 'download_file'
-    res = nil
-    capture_io { res = rpc('tools/call', { name: 'download_file', arguments: { url: 'https://files.example.com/a.png', path: 'Inbox/a.png' } }) }
-    assert_match(/Tool not found/, JSON.parse(res.body).dig('error', 'data').to_s, 'unknown without hosts')
+    assert_includes instructions.call, 'download hosts only: none yet, so nothing can be downloaded until the user adds hosts in the admin panel'
+    McpTools.downloader = FakeDownloader.new({}, [])
+    assert_includes refused('download_file', url: 'https://files.example.com/a.png', path: 'Inbox/a.png'), 'No download hosts yet'
+    assert_empty McpTools.downloader.calls
 
     DownloadHosts.add('files.example.com')
     DownloadHosts.add('*.cdn.example.com')
-    assert_includes tool_names, 'download_file'
-    assert_includes instructions.call, 'these hosts only, the user\'s list (`*.` = its subdomains): `*.cdn.example.com`, `files.example.com`.'
+    assert_includes instructions.call, 'download hosts only: `*.cdn.example.com`, `files.example.com` (`*.` = its subdomains).'
     tool = JSON.parse(rpc('tools/list').body).dig('result', 'tools').find { _1['name'] == 'download_file' }
     assert_equal %w[base path url vault], tool.dig('inputSchema', 'properties').keys.sort
+  ensure
+    McpTools.downloader = nil
   end
 
   def test_download_file

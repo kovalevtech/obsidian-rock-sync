@@ -69,9 +69,13 @@ One per [MCP connector](mcp.md). The page is always there; the tokens work where
 - **Purpose:** folded under the grant; open it to write your instructions.
 - **Revoke:** the connector stops working at once, and the page turns read-only.
 
-**Download hosts**, under the list: where [`download_file`](mcp.md#download_file) may save files from, for all tokens. A host (`example.com`) or its subdomains (`*.example.com`); a pasted URL stands for its host. None: no downloads.
-
 "**check grants**" on a token means its grants wouldn't pass a save any more, for example after a folder rename landed one under another. They keep working; the token's page shows what to fix.
+
+## Download hosts
+
+Where Claude's [`download_file`](mcp.md#download_file) may save files from, for all scoped tokens: a host (`example.com`) or its subdomains (`*.example.com`). A pasted URL stands for its host. With none, Claude is told it can't download anything yet.
+
+Many sites serve files from a CDN on another domain. A download that's refused names the host it needed, so you can add that one too.
 
 ## What's stored
 

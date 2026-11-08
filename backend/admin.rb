@@ -70,6 +70,7 @@ class Admin < Sinatra::Base
     key: 'M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
     add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
     logout: 'M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z',
+    download: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
     extension: 'M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z',
     check: 'M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z',
     copy: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z'
@@ -288,18 +289,22 @@ class Admin < Sinatra::Base
     redirect "/scoped/#{params['id'].to_i}"
   end
 
-  # Download hosts (MCP's download_file, DownloadHosts): a list on the Scoped tokens page
+  # Download hosts (MCP's download_file, DownloadHosts): where downloads may come from, for every scoped token
+  get '/hosts' do
+    erb :hosts
+  end
+
   post '/hosts' do
     _, @hosts_error = DownloadHosts.add(params['host'])
-    redirect '/scoped' unless @hosts_error
+    redirect '/hosts' unless @hosts_error
 
     @host_typed = params['host'].to_s
-    halt 422, erb(:scoped)
+    halt 422, erb(:hosts)
   end
 
   post '/hosts/:id/remove' do
     DownloadHosts.remove(params['id'].to_i)
-    redirect '/scoped'
+    redirect '/hosts'
   end
 
   helpers do

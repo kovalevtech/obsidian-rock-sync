@@ -1,0 +1,30 @@
+<% @title = 'Download hosts' %>
+<% hosts = DownloadHosts.list %>
+<section class="paper">
+  <div class="paper-head"><h2>Download hosts</h2></div>
+  <p class="paper-body muted hint">Where Claude's <strong>download_file</strong> may save files from, for every scoped token: https only, a host (<strong>example.com</strong>) or its subdomains (<strong>*.example.com</strong>). None: Claude is told there's nothing it may download yet. Whatever Claude puts into a URL reaches its host, so list sites you trust with what Claude reads, not hosting where anyone gets a subdomain of their own.</p>
+  <% if hosts.any? %>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Host</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+          <% hosts.each do |host| %>
+            <tr>
+              <td><code><%= h host.host %></code></td>
+              <td class="muted"><%= time(host.created_at) %></td>
+              <td class="actions">
+                <form class="inline" method="post" action="<%= path("/hosts/#{host.id}/remove") %>"><%= csrf_field %><button class="btn danger small">Remove</button></form>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+  <form class="paper-body row spaced" method="post" action="<%= path('/hosts') %>">
+    <%= csrf_field %>
+    <label class="field"><input name="host" placeholder=" " required value="<%= h @host_typed %>"><span>Host</span></label>
+    <button class="btn contained"><%= icon(:add) %>Add host</button>
+  </form>
+  <% if @hosts_error %><p class="paper-body error"><%= h @hosts_error %></p><% end %>
+</section>

@@ -1,6 +1,6 @@
 # The hosts MCP's download_file may fetch from: the admin's list (DB[:download_hosts]). An entry is a host
-# (`example.com`: that host only) or `*.example.com` (its subdomains, not example.com itself). Empty: no downloads, the
-# tool isn't even listed. Read per call, nothing cached: the admin may run in another process.
+# (`example.com`: that host only) or `*.example.com` (its subdomains, not example.com itself). Empty: no downloads (the
+# tool says so). Read per call, nothing cached: the admin may run in another process.
 # Whatever Claude puts into a URL reaches its host (a prompt injection could put a note there): the list is the hosts
 # trusted with that, which is why it's the admin's and not Claude's
 module DownloadHosts

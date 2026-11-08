@@ -88,7 +88,7 @@ class AdminTest < VaultTest
     login
     scoped, = Devices.create_scoped(name: 'claude', grants: [{ vault: 'test', folder: '', mode: 'rw', purpose: '' }])
     device = DB[:devices].where(name: 'test-device').get(:id)
-    pages = %w[/admin/vaults /admin/tokens /admin/tokens?revoked=1 /admin/connect /admin/scoped /admin/scoped/new]
+    pages = %w[/admin/vaults /admin/tokens /admin/tokens?revoked=1 /admin/connect /admin/scoped /admin/scoped/new /admin/hosts]
     pages << "/admin/scoped/#{scoped.id}"
     pages.each do |page|
       get page
@@ -233,14 +233,15 @@ class AdminTest < VaultTest
   # Download hosts: typed as a host, a `*.` one, or a URL (its host); anything else refused, the list unchanged
   def test_download_hosts
     login
-    get '/admin/scoped'
-    assert_includes last_response.body, 'Download hosts'
+    get '/admin/hosts'
+    assert_equal 200, last_response.status
+    assert_includes last_response.body, '<a href="/admin/hosts" class="active">'
     post_form '/admin/hosts', 'host' => ' https://Files.Example.com./pics/a.png '
-    assert_equal '/admin/scoped', last_response['Location']
+    assert_equal '/admin/hosts', last_response['Location']
     post_form '/admin/hosts', 'host' => '*.cdn.example.com'
     post_form '/admin/hosts', 'host' => 'files.example.com'
     assert_equal %w[*.cdn.example.com files.example.com], DownloadHosts.hosts, 'twice: once'
-    get '/admin/scoped'
+    get '/admin/hosts'
     assert_includes last_response.body, '<code>files.example.com</code>'
 
     ['localhost', '1.2.3.4', 'exa mple.com', '*.com', 'example.com:443', '-x.example.com', 'пример.рф', 'a..b', ''].each do |typed|
@@ -252,7 +253,7 @@ class AdminTest < VaultTest
     assert_equal %w[*.cdn.example.com files.example.com], DownloadHosts.hosts
 
     post_form "/admin/hosts/#{DB[:download_hosts].where(host: 'files.example.com').get(:id)}/remove"
-    assert_equal '/admin/scoped', last_response['Location']
+    assert_equal '/admin/hosts', last_response['Location']
     assert_equal %w[*.cdn.example.com], DownloadHosts.hosts
   end
 

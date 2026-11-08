@@ -30,12 +30,10 @@ module McpTools
     exception_reporter: ->(e, _context) { warn "vault-sync: MCP tool failed: #{e.class}: #{e.message}" }
   )
 
-  # One per request: no sessions, the token is the request's. download_file only while the admin lists hosts for it
+  # One per request: no sessions, the token is the request's
   def self.server(token)
-    hosts = DownloadHosts.hosts
-    MCP::Server.new(name: 'vault-sync', version: '1', instructions: instructions(token, hosts),
-                    tools: hosts.any? ? TOOLS + [DOWNLOAD_FILE] : TOOLS, server_context: { token: },
-                    capabilities: { tools: {} }, configuration: CONFIGURATION)
+    MCP::Server.new(name: 'vault-sync', version: '1', instructions: instructions(token, DownloadHosts.hosts),
+                    tools: TOOLS, server_context: { token: }, capabilities: { tools: {} }, configuration: CONFIGURATION)
   end
 
   # Told at initialize: where Claude may read and write and what for, without a call to list_access. A purpose follows
@@ -50,7 +48,7 @@ module McpTools
       #{grants.any? ? grants.join("\n") : '- none: nothing can be read or written yet'}
       The text after a grant is the user's own note on what that folder is for and how to use it: follow it. list_access returns the same list. Paths are vault paths inside these folders, like `Inbox/Idea.md`. #{token.vaults.size > 1 ? 'Your grants are in several vaults: name one in every tool call (`vault`).' : 'Tools take a `vault` argument; with grants in one vault it can be left out.'}
       Use list_folder / read_file to look around, append_file to add to a note ("add this to …"), write_file without `base` to create a new one, with `base` (the etag from read_file) to replace one, delete_file with `base` to remove one. Every file comes with its last commit's author: `device` = the user edited it on a device, `token` = a connector like you wrote it.
-      #{"download_file saves a file from the web (an image, a PDF) into a folder you may write to, from an https URL on these hosts only, the user's list (`*.` = its subdomains): #{hosts.map { "`#{_1}`" }.join(', ')}." if hosts.any?}
+      download_file saves a file from the web (an image, a PDF) into a folder you may write to, from an https URL on the user's list of download hosts only: #{hosts.any? ? "#{hosts.map { "`#{_1}`" }.join(', ')} (`*.` = its subdomains)." : 'none yet, so nothing can be downloaded until the user adds hosts in the admin panel (Download hosts).'}
     TEXT
   end
 
@@ -404,7 +402,7 @@ module McpTools
   DOWNLOAD_FILE = MCP::Tool.define(
     name: 'download_file',
     description: <<~TEXT,
-      Save a file from the web into the user's Obsidian vault — an image, a PDF, any file — from an https URL on the user's list of download hosts (the server instructions name them). The server downloads it; you get the result, not the file.
+      Save a file from the web into the user's Obsidian vault — an image, a PDF, any file — from an https URL on the user's list of download hosts (the server instructions name them; the user edits it in the admin panel). The server downloads it; you get the result, not the file.
       Path: inside a folder you may write to (see list_access), with the file's name, like `Attachments/Diagram.png`. Without an extension it gets the URL's, else one from the file's type. Without `base`: creates the file only (`exists` if something is there, nothing written). With `base` (its etag): replaces it, only if it is still that version (`stale` otherwise).
       Result: JSON `{"status", "path", "etag", "size", "content_type"}`. status: written, unchanged (that exact file was there), exists, stale. Errors say why: a host not on the list (tell the user: they can add it in the admin panel), too big, the site's answer.
     TEXT
@@ -421,8 +419,11 @@ module McpTools
     annotations: { read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: true }
   ) do |url:, path:, server_context:, base: nil, vault: nil|
     McpTools.call(server_context) do |token|
-      hosts = DownloadHosts.hosts # listed only with hosts, but the list may have emptied meanwhile
-      raise Refused, 'Downloads are off: the user lists no download hosts.' if hosts.empty?
+      hosts = DownloadHosts.hosts
+      if hosts.empty?
+        raise Refused, 'No download hosts yet: nothing can be downloaded until the user adds the hosts files may come ' \
+                       'from in the admin panel (Download hosts). Nothing downloaded.'
+      end
 
       vault = McpTools.vault(token, vault)
       rel = McpTools.download_path(token, vault, path, url)
@@ -453,5 +454,5 @@ module McpTools
     end
   end
 
-  TOOLS = [LIST_ACCESS, LIST_FOLDER, READ_FILE, WRITE_FILE, APPEND_FILE, DELETE_FILE].freeze
+  TOOLS = [LIST_ACCESS, LIST_FOLDER, READ_FILE, WRITE_FILE, APPEND_FILE, DELETE_FILE, DOWNLOAD_FILE].freeze
 end
