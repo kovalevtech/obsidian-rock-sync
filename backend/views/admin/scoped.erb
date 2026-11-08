@@ -6,7 +6,7 @@
   <div class="paper-head">
     <h2>Scoped tokens</h2>
     <form class="inline" method="get" action="<%= path('/scoped') %>">
-      <label class="check"><input type="checkbox" name="revoked" value="1"<%= ' checked' if show_revoked %> onchange="this.form.submit()">Show revoked</label>
+      <label class="check"><input type="checkbox" name="revoked" value="1"<%= ' checked' if show_revoked %> data-submit-on-change>Show revoked</label>
     </form>
     <a class="btn contained" href="<%= path('/scoped/new') %>"><%= icon(:add) %>New token</a>
   </div>

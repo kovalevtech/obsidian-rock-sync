@@ -10,7 +10,7 @@
     <% elsif @scoped %>
       <span class="chip active">Active</span>
       <form class="inline" method="post" action="<%= path("/scoped/#{@scoped[:id]}/revoke") %>"
-            onsubmit="return confirm('Revoke <%= h @scoped[:name] %>? Claude\'s connector with it stops working.')">
+            data-confirm="Revoke <%= h @scoped[:name] %>? Claude's connector with it stops working.">
         <%= csrf_field %><button class="btn danger small">Revoke</button>
       </form>
     <% end %>
@@ -21,8 +21,7 @@
       <p class="muted">The token is shown once, it won't be shown again: put it into 1Password. Then claude.ai → Settings → Connectors → Add custom connector: this URL, <strong>No sign-in</strong>, and under <strong>Request headers</strong> the header <code>Authorization</code> with the value below.</p>
       <code class="token"><%= h @mcp_url %></code>
       <code class="token" id="token">Bearer <%= h @token %></code>
-      <button type="button" class="btn contained" onclick="navigator.clipboard.writeText(document.getElementById('token').textContent)
-        .then(() => { this.lastChild.textContent = 'Copied' })"><%= icon(:copy) %><span>Copy header value</span></button>
+      <button type="button" class="btn contained" data-copy="Bearer <%= h @token %>"><%= icon(:copy) %><span>Copy header value</span></button>
     </div>
   <% end %>
 
@@ -63,7 +62,7 @@
       <p class="muted hint grants-hint">Folder and its subfolders; empty or <strong>/</strong> = the whole vault. <strong>r</strong> = list and read files, <strong>w</strong> = create, append and replace, <strong>rw</strong> = both, and delete. Grants may overlap: their modes add up, so a grant inside another one only adds what that one doesn't give. A purpose tells Claude what the folder is for.</p>
 
       <div class="row">
-        <button type="button" class="btn" onclick="this.form.querySelector('table.grants').insertAdjacentHTML('beforeend', document.getElementById('grant-row').innerHTML.replaceAll('__i__', Date.now()))"><%= icon(:add) %>Add grant</button>
+        <button type="button" class="btn" data-add-grant><%= icon(:add) %>Add grant</button>
         <span class="spacer"></span>
         <a class="btn" href="<%= path('/scoped') %>"><%= @token ? 'Done' : 'Cancel' %></a>
         <button class="btn contained"><%= @scoped ? 'Save' : 'Create token' %></button>

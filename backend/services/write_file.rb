@@ -2,7 +2,7 @@
 # if_match: the version the client edited; if_none_match: '*' = create only; mergeable: see MergeVersions;
 # author: Vault::Author of the commit; action: the commit's verb instead of PUT (AppendFile: APPEND); keeps: the file's
 # folders get their .keep (how the plugin keeps folders on the server) in the same commit — MCP writes; the plugin
-# pushes its own.
+# pushes its own. trailers: Vault#commit's (download_file's Source).
 # Returns [status, etag, body, modified_at]:
 #   :written    etag = the new version
 #   :unchanged  identical content: success whatever the headers, nothing committed
@@ -12,7 +12,8 @@
 #   :stale      nothing to merge (create-only on an existing file, not mergeable, base unknown to git): body = the
 #               current server version. File gone meanwhile: just [:stale]
 class WriteFile
-  def self.call(vault, path, content, if_match: nil, if_none_match: nil, mergeable: false, author: nil, action: 'PUT', keeps: false)
+  def self.call(vault, path, content, if_match: nil, if_none_match: nil, mergeable: false, author: nil, action: 'PUT',
+                keeps: false, trailers: {})
     rel = vault.normalize(path)
     full = vault.file(rel)
 
@@ -38,7 +39,7 @@ class WriteFile
       end
 
       write = keeps ? missing_keeps(vault, rel).to_h { [_1, ''] } : {}
-      vault.commit("#{merged ? 'MERGE' : action} #{rel}", write: write.merge(rel => content), author:)
+      vault.commit("#{merged ? 'MERGE' : action} #{rel}", write: write.merge(rel => content), author:, trailers:)
       merged ? [:merged, etag, content] : [:written, etag]
     end
   end

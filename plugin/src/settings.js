@@ -1,6 +1,6 @@
 import { Platform, PluginSettingTab, Setting } from 'obsidian';
 import { formatSavedAt } from './format.js';
-import { codeOf, isCode, linkOf, deviceNameOf, defaultDeviceName } from './pairing.js';
+import { codeOf, isCode, linkOf, insecure, deviceNameOf, defaultDeviceName } from './pairing.js';
 import { setIconOf } from './ui/icons.js';
 
 // device: the name this device's token has on the server (the author of its commits), as /pair answered
@@ -26,6 +26,15 @@ const MESSAGES = {
   checking: 'Checking…',
   switching: 'Switching: waiting for the running request…',
   removing: 'Removing: waiting for the running request…',
+};
+
+const ENDPOINT_DESC = 'Address of the sync server, or the connection link (server and code in one)';
+const INSECURE = 'Not encrypted: the token and your notes travel in the clear. Use HTTPS, or a VPN such as Tailscale';
+
+// A setting's description, the warning under it when the server URL sends everything in the clear
+const describeEndpoint = (setting, desc, endpoint) => {
+  setting.setDesc(desc);
+  if (insecure(endpoint)) setting.descEl.createDiv({ cls: 'rock-sync-insecure', text: INSECURE });
 };
 
 const hostOf = (endpoint) => {
@@ -111,8 +120,9 @@ class RockSyncSettingTab extends PluginSettingTab {
     const row = (name, value) => {
       const setting = new Setting(el).setName(name);
       setting.controlEl.createSpan({ cls: 'rock-sync-connection-value', text: value });
+      return setting;
     };
-    row('Server', settings.endpoint);
+    describeEndpoint(row('Server', settings.endpoint), '', settings.endpoint);
     row('Vault', settings.vault);
     row('Device', settings.device || '—');
     this.actions = new Setting(el)
@@ -156,7 +166,7 @@ class RockSyncSettingTab extends PluginSettingTab {
           this.render();
         });
       });
-    field('endpoint', 'Server URL', 'Address of the sync server, or the connection link (server and code in one)', (text) => text.setPlaceholder(DEFAULT_SETTINGS.endpoint));
+    this.endpointSetting = field('endpoint', 'Server URL', ENDPOINT_DESC, (text) => text.setPlaceholder(DEFAULT_SETTINGS.endpoint));
     field('code', 'Connection code', "From the server's admin panel (Vaults, Connect device), or its connection link. Connects that vault, works once", (text) => {
       text.inputEl.inputMode = 'numeric';
       text.setPlaceholder('482 913');
@@ -282,19 +292,20 @@ class RockSyncSettingTab extends PluginSettingTab {
     this.actions.setDesc(this.resultText());
     this.actions.descEl.toggleClass('rock-sync-check-error', FAILED.includes(status));
     if (this.mode === 'view') {
-      this.editButton.buttonEl.toggleClass('rock-sync-hidden', this.removing);
-      this.keepButton.buttonEl.toggleClass('rock-sync-hidden', !this.removing);
+      this.editButton.buttonEl.toggle(!this.removing);
+      this.keepButton.buttonEl.toggle(Boolean(this.removing));
       this.removeButton.setDisabled(busy || status === 'conflicts');
       this.keepButton.setDisabled(busy);
       return;
     }
     const connected = this.plugin.credentials.complete();
+    describeEndpoint(this.endpointSetting, ENDPOINT_DESC, this.form.endpoint);
     for (const text of Object.values(this.inputs)) text.setDisabled(Boolean(this.draft) || busy);
-    this.cancelButton.buttonEl.toggleClass('rock-sync-hidden', !connected && !this.draft);
+    this.cancelButton.buttonEl.toggle(connected || Boolean(this.draft));
     this.cancelButton.setDisabled(status === 'switching');
-    this.connectButton.buttonEl.toggleClass('rock-sync-hidden', Boolean(this.draft));
+    this.connectButton.buttonEl.toggle(!this.draft);
     this.connectButton.setDisabled(!this.canConnect());
-    this.saveButton.buttonEl.toggleClass('rock-sync-hidden', !this.draft);
+    this.saveButton.buttonEl.toggle(Boolean(this.draft));
     this.saveButton.setDisabled(!this.canSave());
   }
 

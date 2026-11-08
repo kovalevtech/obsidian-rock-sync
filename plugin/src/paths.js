@@ -10,10 +10,27 @@ const folderOfKeep = (path) => path.slice(0, -(KEEP.length + 1));
 const IGNORED = new Set(['Thumbs.db', 'desktop.ini']);
 const ignored = (path) => IGNORED.has(path.split('/').pop());
 
+// Code points HFS+ ignores in names (the server's Vault::Path::HFS_IGNORED): `.<U+200C>obsidian` is `.obsidian` there
+const HFS_IGNORED = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g;
+
 // Everything the vault API sees. Hidden (dot) paths — `.obsidian`, `.trash`, `.git` — it doesn't: never synced,
 // whichever side has them (a pulled hidden file would never show up locally)
-const hidden = (path) => (isKeep(path) ? folderOfKeep(path) : path).split('/').some((part) => part.startsWith('.'));
+const hidden = (path) => (isKeep(path) ? folderOfKeep(path) : path).split('/')
+  .some((part) => part.replace(HFS_IGNORED, '').startsWith('.'));
 const syncable = (path) => !hidden(path) && !ignored(path);
+
+// A path the server may hand us (the manifest's keys): the server's own rule (Vault::Path) mirrored, hidden segments
+// left to syncable(). Anything else never came from a real server — and Obsidian's API wouldn't stop it: its
+// normalizePath turns `\` into `/` and keeps `..`, the desktop adapter joins that onto the vault's folder, so
+// `a\..\..\x` is written outside the vault
+const utf8Length = (text) => new TextEncoder().encode(text).length;
+const NTFS_DOTGIT = /^git~1[ .]*(:|$)/i;
+const validPath = (path) => typeof path === 'string'
+  && utf8Length(path) <= 1024
+  && !/[\p{Cc}\p{Cs}\\]/u.test(path) // control characters, a lone surrogate, a backslash
+  && !path.startsWith('~')
+  && path.split('/').every((part) => part && part !== '.' && part !== '..' && utf8Length(part) <= 255
+    && !NTFS_DOTGIT.test(part));
 
 // Notes: written through the text APIs (an open editor keeps its cursor)
 const isMarkdown = (path) => path.toLowerCase().endsWith('.md');
@@ -54,5 +71,5 @@ function copyPath(path, exists) {
 const encodePath = (path) => path.split('/').map(encodeURIComponent).join('/');
 
 export {
-  KEEP, isKeep, keepOf, folderOfKeep, ignored, syncable, isMarkdown, mergeable, copyOrigin, copyPath, encodePath,
+  KEEP, isKeep, keepOf, folderOfKeep, ignored, syncable, validPath, isMarkdown, mergeable, copyOrigin, copyPath, encodePath,
 };

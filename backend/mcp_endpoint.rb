@@ -7,7 +7,13 @@ require_relative 'environment'
 class McpEndpoint < Sinatra::Base
   BEARER = /\ABearer +(\S+)\z/i
 
+  # Bytes of a request body: what one call may write (MCP_MAX_WRITE) twice over — JSON's escapes, base64's third — and
+  # the rest of the JSON-RPC, never over MAX_FILE_SIZE. Refused unread: the gem parses the whole body before a tool
+  # sees its size
+  def self.max_body = [(Config.mcp_max_write * 2) + (64 * 1024), Config.max_file_size].min
+
   set :show_exceptions, false
+  set :static, false # public/ (Admin's stylesheet) would be served before the token is looked at
   # Its own auth (the header): no browser session to protect, and claude.ai's requests may name another Origin
   set :protection, except: :http_origin
 
@@ -31,13 +37,16 @@ class McpEndpoint < Sinatra::Base
     env['vault_sync.auth'] = "mcp token=#{token.name}"
     @token = McpTools::Token.new(id: token.id, name: token.name, grants: Grants.of(token.id))
     halt 405, { 'allow' => 'POST' }, '' unless request.post?
-    halt 413 if request.content_length.to_i > Config.max_file_size
+    halt 413 if request.content_length.to_i > McpEndpoint.max_body
     halt 415 if FormBody.sent?(request)
   end
 
   # JSON-RPC: initialize, notifications/initialized, tools/list, tools/call. A notification has no answer: 202
   post %r{/?} do
-    response = McpTools.server(@token).handle_json(request.body.read)
+    body = request.body.read(McpEndpoint.max_body + 1).to_s # chunked: no Content-Length to go by
+    halt 413 if body.bytesize > McpEndpoint.max_body
+
+    response = McpTools.server(@token).handle_json(body)
     next 202 unless response
 
     content_type :json

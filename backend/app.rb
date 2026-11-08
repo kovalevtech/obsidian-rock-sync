@@ -5,12 +5,16 @@ require 'uri'
 
 class App < Sinatra::Base
   set :show_exceptions, false
+  # Sinatra serves public/ (its app_file's, Admin's stylesheet there) before any filter, auth included: never here
+  set :static, false
 
   # Matched by name: Zeitwerk reload replaces the class objects, class-keyed handlers stop matching
   error StandardError do
     e = env['sinatra.error']
     case e.class.name
-    when 'Vault::Path::BadPath', 'Vault::Path::Hidden' then [400, e.message]
+    when 'Vault::Path::BadPath', 'Vault::Path::Hidden'
+      content_type 'text/plain' # the path, echoed: never as HTML
+      [400, e.message]
     when 'Vault::NotFound', 'Sinatra::NotFound' then 404 # the latter: no such route
     else 500
     end

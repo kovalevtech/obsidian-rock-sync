@@ -1,7 +1,7 @@
 import { requestUrl, Platform, apiVersion } from 'obsidian';
 import { settings } from './settings.js';
 import { debug } from './log.js';
-import { encodePath, mergeable, syncable } from './paths.js';
+import { encodePath, mergeable, syncable, validPath } from './paths.js';
 
 // The running sync's token (vault-scoped localStorage, loaded / saved by Credentials) and this client's X-Rock-Sync-Client;
 // endpoint and vault are in settings. onUnauthorized: the server refused them (401) — the plugin pauses sync.
@@ -57,12 +57,22 @@ const pairUrl = (endpoint) => `${endpoint}/pair`;
 // DELETE /token: the token revokes itself (Remove, or a connection replaced)
 const tokenUrl = (endpoint) => `${endpoint}/token`;
 
+// Paths from the server already warned about: once each, not at every manifest
+const refusedPaths = new Set();
+
 // GET /manifest's files ({ path: [hash, size] }), syncable paths only: { remote: path -> hash, sizes: path -> bytes }.
-// A server from before sizes sends the hash alone (no size: nothing counts as too large for this device)
+// A server from before sizes sends the hash alone (no size: nothing counts as too large for this device).
+// The one way paths come from the server: one that isn't a vault path (validPath) is dropped here, before anything
+// could write it
 function readManifest(json) {
   const remote = {};
   const sizes = {};
   for (const [path, entry] of Object.entries(json.files)) {
+    if (!validPath(path)) {
+      if (!refusedPaths.has(path)) console.warn('rock-sync: refused a path from the server', JSON.stringify(path));
+      refusedPaths.add(path);
+      continue;
+    }
     if (!syncable(path)) continue;
     const [hash, size] = Array.isArray(entry) ? entry : [entry];
     remote[path] = hash;

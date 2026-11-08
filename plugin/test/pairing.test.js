@@ -1,7 +1,7 @@
 // What's typed when connecting with a code, and the name a device offers. Run: npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { codeOf, isCode, linkOf, deviceNameOf, defaultDeviceName } from '../src/pairing.js';
+import { codeOf, isCode, linkOf, insecure, deviceNameOf, defaultDeviceName } from '../src/pairing.js';
 
 test('codes', () => {
   assert.equal(codeOf(' 482 913 '), '482913');
@@ -34,4 +34,16 @@ test('defaultDeviceName', () => {
   assert.equal(defaultDeviceName({ isIosApp: true }), 'iphone');
   assert.equal(defaultDeviceName({ deviceName: 'Планшет', isWin: true }), 'windows');
   assert.equal(defaultDeviceName({}), 'device');
+});
+
+test('insecure: plain http:// except this machine and a tailnet', () => {
+  for (const url of ['http://notes.example.com', 'http://192.168.1.5:9292', 'http://10.0.0.2', 'HTTP://Notes.Example.com/',
+    'http://100.63.0.1', 'http://100.128.0.1', 'http://ts.net.example.com', 'http://[2001:db8::1]:9292']) {
+    assert.ok(insecure(url), url);
+  }
+  for (const url of ['https://notes.example.com', 'http://localhost:9292', 'http://127.0.0.1:9292', 'http://[::1]:9292',
+    'http://app.localhost', 'http://100.64.0.1', 'http://100.101.102.103:9292', 'http://100.127.255.254',
+    'http://nas.tail1234.ts.net:9292', ' http://localhost ', '', 'notes.example.com', 'not a url']) {
+    assert.ok(!insecure(url), url);
+  }
 });

@@ -1,7 +1,7 @@
 <% @title = 'Device tokens' %>
 <% vaults = Vault.names %>
 <% chosen = params['vault'].to_s %>
-<section class="paper" style="max-width: 720px">
+<section class="paper slim">
   <div class="paper-head"><h2>Connect a device</h2></div>
   <% if vaults.empty? %>
     <div class="paper-body muted">Create a vault first.</div>
@@ -15,7 +15,7 @@
           <option value="<%= h name %>"<%= ' selected' if name == chosen %>><%= h name %></option>
         <% end %>
       </select>
-      <div class="row" style="margin-top: 16px">
+      <div class="row spaced">
         <button class="btn contained"><%= icon(:add) %>Get a code</button>
         <a class="btn" href="<%= path('/tokens') %>">Cancel</a>
       </div>

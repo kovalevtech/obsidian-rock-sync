@@ -68,13 +68,48 @@ class AdminTest < VaultTest
     assert_equal %w[test-device], DB[:devices].select_map(:name)
   end
 
-  # The login page's stylesheet: no session needed
+  # The login page's stylesheet and script: no session needed
   def test_stylesheet_without_a_session
     get '/admin/login'
     assert_match(%r{href="/admin/admin.css\?v=\d+"}, last_response.body)
+    assert_match(%r{<script src="/admin/admin.js\?v=\d+" defer>}, last_response.body)
     get '/admin/admin.css'
     assert_equal 200, last_response.status
     assert_match %r{\Atext/css}, last_response.content_type
+    get '/admin/admin.js'
+    assert_equal 200, last_response.status
+    assert_match %r{\A(text|application)/javascript}, last_response.content_type
+  end
+
+  # Every page under the CSP, and nothing on them it would block: no inline handler, script or style
+  def test_content_security_policy
+    get '/admin/login'
+    assert_equal Admin::CSP, last_response['Content-Security-Policy']
+    login
+    scoped, = Devices.create_scoped(name: 'claude', grants: [{ vault: 'test', folder: '', mode: 'rw', purpose: '' }])
+    device = DB[:devices].where(name: 'test-device').get(:id)
+    pages = %w[/admin/vaults /admin/tokens /admin/tokens?revoked=1 /admin/connect /admin/scoped /admin/scoped/new /admin/hosts]
+    pages << "/admin/scoped/#{scoped.id}"
+    pages.each do |page|
+      get page
+      assert_equal 200, last_response.status, page
+      assert_equal Admin::CSP, last_response['Content-Security-Policy'], page
+      assert_no_inline(last_response.body, page)
+    end
+    post_form '/admin/connect', 'vault' => 'test'
+    assert_no_inline(last_response.body, 'the pair page')
+    post_form "/admin/tokens/#{device}/reconnect"
+    assert_no_inline(last_response.body, 'a reconnect')
+    post_form '/admin/scoped', 'name' => 'other', 'grants' => { '0' => { 'vault' => 'test', 'folder' => '', 'mode' => 'r' } }
+    assert_includes last_response.body, 'id="token">Bearer '
+    assert_no_inline(last_response.body, 'a new token')
+  end
+
+  def assert_no_inline(body, what)
+    refute_match(/\s(on[a-z]+|style)=/i, body, what)
+    refute_match(/<script(?![^>]*\ssrc=)/i, body, what)
+    refute_match(/<style/i, body, what)
+    refute_includes body, 'javascript:', what
   end
 
   def test_login
@@ -178,6 +213,58 @@ class AdminTest < VaultTest
     @now += 30
     assert_refused login(password: 'wrong'), 'reset by the login: a failure, not a lockout'
     assert_equal '/admin/', login(code: code)['Location']
+  end
+
+  # 12 failures: 60 s · 2^7 would be over two hours
+  def test_lockout_stops_doubling_at_an_hour
+    5.times { assert_refused login(password: 'wrong') }
+    lock = 60
+    7.times do
+      @now += lock + 1
+      assert_refused login(password: 'wrong')
+      lock = [lock * 2, Admin::Gate::MAX_LOCKOUT].min
+    end
+    @now += Admin::Gate::MAX_LOCKOUT - 1
+    assert_refused login, 'still locked'
+    @now += 2
+    assert_equal '/admin/', login['Location']
+  end
+
+  # Download hosts: typed as a host, a `*.` one, or a URL (its host); anything else refused, the list unchanged
+  def test_download_hosts
+    login
+    get '/admin/hosts'
+    assert_equal 200, last_response.status
+    assert_includes last_response.body, '<a href="/admin/hosts" class="active">'
+    post_form '/admin/hosts', 'host' => ' https://Files.Example.com./pics/a.png '
+    assert_equal '/admin/hosts', last_response['Location']
+    post_form '/admin/hosts', 'host' => '*.cdn.example.com'
+    post_form '/admin/hosts', 'host' => 'files.example.com'
+    assert_equal %w[*.cdn.example.com files.example.com], DownloadHosts.hosts, 'twice: once'
+    get '/admin/hosts'
+    assert_includes last_response.body, '<code>files.example.com</code>'
+
+    ['localhost', '1.2.3.4', 'exa mple.com', '*.com', 'example.com:443', '-x.example.com', 'пример.рф', 'a..b', ''].each do |typed|
+      post_form '/admin/hosts', 'host' => typed
+      assert_equal 422, last_response.status, typed
+      assert_includes last_response.body, "isn&#39;t a host name", typed unless typed.empty?
+      assert_includes last_response.body, %(name="host" placeholder=" " required value="#{Rack::Utils.escape_html(typed)}"), typed
+    end
+    assert_equal %w[*.cdn.example.com files.example.com], DownloadHosts.hosts
+
+    post_form "/admin/hosts/#{DB[:download_hosts].where(host: 'files.example.com').get(:id)}/remove"
+    assert_equal '/admin/hosts', last_response['Location']
+    assert_equal %w[*.cdn.example.com], DownloadHosts.hosts
+  end
+
+  def test_download_hosts_matching
+    assert DownloadHosts.allowed?('files.example.com', %w[files.example.com])
+    assert DownloadHosts.allowed?('a.b.example.com', %w[*.example.com])
+    refute DownloadHosts.allowed?('example.com', %w[*.example.com])
+    refute DownloadHosts.allowed?('evilexample.com', %w[*.example.com example.com])
+    refute DownloadHosts.allowed?('files.example.com.evil.org', %w[files.example.com])
+    refute DownloadHosts.allowed?('x.files.example.com', %w[files.example.com])
+    assert DownloadHosts.allowed?('FILES.example.com.', %w[files.example.com])
   end
 
   def test_post_without_csrf_token
@@ -470,7 +557,7 @@ class AdminTest < VaultTest
     assert_includes last_response.body, 'name="revoked" value="1" checked'
 
     get "/admin/scoped/#{token.id}"
-    assert_includes last_response.body, "return confirm('Revoke claude?"
+    assert_includes last_response.body, 'data-confirm="Revoke claude?'
     assert_equal "/admin/scoped/#{token.id}", post_form("/admin/scoped/#{token.id}/revoke")['Location']
     assert_equal [nil, :revoked], Devices.authenticate(secret, kind: 'scoped')
 

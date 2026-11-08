@@ -302,6 +302,6 @@ body {
   color: var(--text-error);
 }
 
-.rock-sync-hidden {
-  display: none !important;
+.rock-sync-insecure {
+  color: var(--text-warning);
 }

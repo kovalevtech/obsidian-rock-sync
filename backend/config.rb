@@ -134,9 +134,10 @@ class Config
     Integer(ENV.fetch('MAX_FILE_SIZE', 100 * 1024 * 1024))
   end
 
-  # Bytes: the most an MCP tool call may write (write_file's content, append_file's text)
+  # Bytes: the most an MCP tool call may write (write_file's content — decoded, for base64 —, append_file's text);
+  # 20 MB = the plugin's DEVICE_LIMIT: a bigger file would be a stub on phones
   def self.mcp_max_write
-    Integer(ENV.fetch('MCP_MAX_WRITE', 1024 * 1024))
+    Integer(ENV.fetch('MCP_MAX_WRITE', 20 * 1024 * 1024))
   end
 
   # The server's origin for the MCP URL the admin panel shows, when Claude reaches it elsewhere than devices do (only

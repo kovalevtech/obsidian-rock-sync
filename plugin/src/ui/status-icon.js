@@ -81,7 +81,7 @@ export default class StatusIcon {
       this.ribbon = this.plugin.addRibbonIcon('refresh-cw', 'Rock Sync', () => this.plugin.openSettings());
       this.ribbon.addClass('rock-sync-status');
     }
-    this.ribbon?.toggleClass('rock-sync-hidden', !ribbonNeeded);
+    this.ribbon?.toggle(ribbonNeeded);
     for (const el of [this.el, this.ribbon]) if (el) this.draw(el);
   }
 

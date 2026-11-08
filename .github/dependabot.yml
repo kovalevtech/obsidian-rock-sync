@@ -1,0 +1,28 @@
+# Weekly updates, one pull request per ecosystem, from a dependabot/… branch: Dependabot never pushes to main and
+# nothing here merges by itself (no auto-merge) — a person reviews and merges. The Test workflow runs on each.
+# What it updates: the actions release.yml / test.yml pin by commit (a tag can be moved under it; Dependabot moves the
+# pin and its version comment), the plugin's dev dependencies, the server's gems. Not the image's base: its FROM takes
+# the Ruby version from .ruby-version (a build arg), which Dependabot can't read
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: npm
+    directory: /plugin
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ['*']
+  - package-ecosystem: bundler
+    directory: /backend
+    schedule:
+      interval: weekly
+    groups:
+      gems:
+        patterns: ['*']

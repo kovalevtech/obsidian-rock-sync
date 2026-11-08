@@ -100,10 +100,11 @@ class Vault
   # One commit, then tree/ made to match it — git first: a failure up to the commit leaves tree/ and HEAD as they were.
   # write: { rel => content }, each put next to its place as a temp file before the commit and renamed into place after
   # it; remove: [rel], deleted after it. Every write is its own commit (no amend): any version a client synced stays a
-  # base for 3-way merges. author: Vault::Author (git author + `Client:` trailer); nil = the server. Long polls hear
-  # about it
-  def commit(message, write: {}, remove: [], author: nil)
-    message = "#{message}\n\nClient: #{author.client}" if author&.client
+  # base for 3-way merges. author: Vault::Author (git author + `Client:` trailer); nil = the server. trailers: more of
+  # them ({ 'Source' => url }: one line each, after Client). Long polls hear about it
+  def commit(message, write: {}, remove: [], author: nil, trailers: {})
+    trailers = { 'Client' => author&.client }.merge(trailers).compact
+    message = "#{message}\n\n#{trailers.map { "#{_1}: #{_2.to_s.delete("\r\n")}" }.join("\n")}" if trailers.any?
     temps = {}
     begin
       changes = write.to_h { |rel, content| [rel, git.hash_object(content)] }.merge(remove.to_h { [_1, nil] })

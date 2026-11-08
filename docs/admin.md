@@ -33,7 +33,7 @@ Keep it off the public internet ([why](security.md#admin-panel)).
 
 ## Logging in
 
-User name, password and, with TOTP, the current code, in one form. A code works only once, so a second login within the same 30 seconds has to wait for the next code. After 5 failures, all logins are refused for 60 seconds, doubling with each further failure; restarting the container that serves the panel clears that. The session lasts 12 hours.
+User name, password and, with TOTP, the current code, in one form. A code works only once, so a second login within the same 30 seconds has to wait for the next code. After 5 failures, all logins are refused for 60 seconds, doubling with each further failure up to an hour; restarting the container that serves the panel clears that. The session lasts 12 hours.
 
 ## Vaults
 
@@ -70,6 +70,12 @@ One per [MCP connector](mcp.md). The page is always there; the tokens work where
 - **Revoke:** the connector stops working at once, and the page turns read-only.
 
 "**check grants**" on a token means its grants wouldn't pass a save any more, for example after a folder rename landed one under another. They keep working; the token's page shows what to fix.
+
+## Download hosts
+
+Where Claude's [`download_file`](mcp.md#download_file) may save files from, for all scoped tokens: a host (`example.com`) or its subdomains (`*.example.com`). A pasted URL stands for its host. A download from any other host is refused, and Claude shows you its URL and host to add here; then ask it to try again.
+
+Many sites serve files from a CDN on another domain: the refusal names the host the download was redirected to, so you can add that one too.
 
 ## What's stored
 

@@ -367,6 +367,14 @@ class ApiTest < VaultTest
     assert_equal 404, last_response.status
   end
 
+  # The reason names the path: as text, never as HTML
+  def test_bad_path_is_400_plain_text
+    get '/files/~root/%3Cb%3Ex.md'
+    assert_equal 400, last_response.status
+    assert_equal 'text/plain;charset=utf-8', last_response.content_type
+    assert_includes last_response.body, '~root/<b>x.md'
+  end
+
   def test_move_without_destination
     post '/move/a.md'
     assert_equal 400, last_response.status
