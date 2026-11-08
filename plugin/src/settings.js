@@ -292,8 +292,8 @@ class RockSyncSettingTab extends PluginSettingTab {
     this.actions.setDesc(this.resultText());
     this.actions.descEl.toggleClass('rock-sync-check-error', FAILED.includes(status));
     if (this.mode === 'view') {
-      this.editButton.buttonEl.toggleClass('rock-sync-hidden', this.removing);
-      this.keepButton.buttonEl.toggleClass('rock-sync-hidden', !this.removing);
+      this.editButton.buttonEl.toggle(!this.removing);
+      this.keepButton.buttonEl.toggle(Boolean(this.removing));
       this.removeButton.setDisabled(busy || status === 'conflicts');
       this.keepButton.setDisabled(busy);
       return;
@@ -301,11 +301,11 @@ class RockSyncSettingTab extends PluginSettingTab {
     const connected = this.plugin.credentials.complete();
     describeEndpoint(this.endpointSetting, ENDPOINT_DESC, this.form.endpoint);
     for (const text of Object.values(this.inputs)) text.setDisabled(Boolean(this.draft) || busy);
-    this.cancelButton.buttonEl.toggleClass('rock-sync-hidden', !connected && !this.draft);
+    this.cancelButton.buttonEl.toggle(connected || Boolean(this.draft));
     this.cancelButton.setDisabled(status === 'switching');
-    this.connectButton.buttonEl.toggleClass('rock-sync-hidden', Boolean(this.draft));
+    this.connectButton.buttonEl.toggle(!this.draft);
     this.connectButton.setDisabled(!this.canConnect());
-    this.saveButton.buttonEl.toggleClass('rock-sync-hidden', !this.draft);
+    this.saveButton.buttonEl.toggle(Boolean(this.draft));
     this.saveButton.setDisabled(!this.canSave());
   }
 

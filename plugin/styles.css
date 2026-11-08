@@ -305,7 +305,3 @@ body {
 .rock-sync-insecure {
   color: var(--text-warning);
 }
-
-.rock-sync-hidden {
-  display: none !important;
-}
