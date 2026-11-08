@@ -108,6 +108,33 @@ class McpTest < VaultTest
         assert_equal unknown, [last_response.status, last_response.body], "#{path} #{authorization}"
       end
     end
+    # public/ (Admin's stylesheet) isn't served here either
+    [nil, "Bearer #{@secret}"].each do |authorization|
+      get '/mcp/admin/admin.css', nil, authorization ? { 'HTTP_AUTHORIZATION' => authorization } : {}
+      assert_equal unknown, [last_response.status, last_response.body], authorization.inspect
+    end
+  end
+
+  # The body is refused unread over MCP_MAX_WRITE twice over (+ 64 KB), with a Content-Length or chunked
+  def test_body_limit
+    ENV['MCP_MAX_WRITE'] = '10'
+    assert_equal 20 + 65_536, McpEndpoint.max_body
+    big = JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/list', params: { pad: 'x' * McpEndpoint.max_body })
+    auth = { 'CONTENT_TYPE' => 'application/json', 'HTTP_AUTHORIZATION' => "Bearer #{@secret}" }
+    post '/mcp', big, auth
+    assert_equal 413, last_response.status
+    reader, writer = IO.pipe
+    feeder = Thread.new { writer.write(big) rescue Errno::EPIPE } # over a pipe's buffer: written while it's read
+    post '/mcp', nil, auth.merge('HTTP_TRANSFER_ENCODING' => 'chunked', input: reader)
+    assert_equal 413, last_response.status
+    reader.close
+    feeder.join
+    writer.close
+    assert_equal 200, rpc('tools/list').status
+    ENV.delete('MCP_MAX_WRITE')
+    assert_equal 2 * 20 * 1024 * 1024 + 65_536, McpEndpoint.max_body
+  ensure
+    ENV.delete('MCP_MAX_WRITE')
   end
 
   def test_get_and_delete_are_405

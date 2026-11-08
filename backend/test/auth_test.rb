@@ -185,6 +185,16 @@ class AuthTest < VaultTest
     assert_in_delta Time.now, DB[:devices].where(name: 'test-device').get(:last_seen_at), 5
   end
 
+  # public/ is Admin's (its stylesheet): App serves none of it, credentials or not
+  def test_no_static_files
+    assert File.file?(File.join(__dir__, '../public/admin/admin.css'))
+    get '/admin/admin.css'
+    assert_equal 401, last_response.status
+    basic_authorize('test', @token)
+    get '/admin/admin.css'
+    assert_equal [404, ''], [last_response.status, last_response.body]
+  end
+
   def test_health_answers_without_credentials
     %w[GET HEAD].each do |verb|
       res = call(verb, '/health', nil)

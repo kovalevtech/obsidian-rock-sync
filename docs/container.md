@@ -63,7 +63,17 @@ The image starts as root, which is fine with named volumes. For bind mounts, run
       - /srv/rock-sync/db:/db
 ```
 
-Any uid works, with or without a passwd entry. It must match the owner of the files, or git will refuse the repositories as "dubious ownership". The server writes only under the two volumes, so `--read-only` works too.
+Any uid works, with or without a passwd entry. It must match the owner of the files, or git will refuse the repositories as "dubious ownership".
+
+It needs no Linux capabilities and writes only under the two volumes, so lock the container down either way:
+
+```yaml
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+```
+
+The same as flags: `--read-only --cap-drop ALL --security-opt no-new-privileges:true`.
 
 ## Why it won't start
 

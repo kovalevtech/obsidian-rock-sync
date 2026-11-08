@@ -33,6 +33,9 @@ services:
       - db:/db
     ports:
       - 127.0.0.1:9292:9292
+    read_only: true                       # it writes only to the two volumes
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
 volumes:
   vaults:
   db:

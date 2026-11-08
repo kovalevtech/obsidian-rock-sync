@@ -1,0 +1,33 @@
+name: Test
+
+# The plugin's and the server's tests: on every pull request (Dependabot's too, so an update is tested before anyone
+# merges it), and as the first job of a release (release.yml calls this)
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: plugin
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: plugin/package-lock.json
+
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
+        with:
+          working-directory: backend
+          bundler-cache: true
+
+      - run: make deps test

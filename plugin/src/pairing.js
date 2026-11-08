@@ -19,6 +19,22 @@ const linkOf = (typed) => {
   return { endpoint: `${url.origin}${url.pathname}`.replace(/\/+$/, ''), code };
 };
 
+// A server URL that sends the token and the notes in the clear: plain http://, unless to this machine or over a tailnet
+// (Tailscale's 100.64.0.0/10 and its *.ts.net names: WireGuard underneath). Not a URL at all: nothing to say yet
+const insecure = (endpoint) => {
+  let url;
+  try {
+    url = new URL(endpoint.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:') return false;
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (['localhost', '::1'].includes(host) || host.endsWith('.localhost') || host.endsWith('.ts.net')) return false;
+  const ip = host.match(/^(\d+)\.(\d+)\.\d+\.\d+$/);
+  return !(ip && (ip[1] === '127' || (ip[1] === '100' && Number(ip[2]) >= 64 && Number(ip[2]) <= 127)));
+};
+
 // What's typed → a name the server takes (the author of this device's commits): may be '' (nothing usable in it)
 const deviceNameOf = (typed) => typed.toLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -36,4 +52,4 @@ const defaultDeviceName = (platform) => {
   return platform.isMacOS ? 'mac' : platform.isWin ? 'windows' : platform.isLinux ? 'linux' : 'device';
 };
 
-export { codeOf, isCode, linkOf, deviceNameOf, defaultDeviceName };
+export { codeOf, isCode, linkOf, insecure, deviceNameOf, defaultDeviceName };

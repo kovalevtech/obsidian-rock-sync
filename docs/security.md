@@ -28,6 +28,8 @@ The [admin panel](admin.md#device-tokens) issues a one-time, 6-digit code for a 
 
 **Storage on a device.** The plugin keeps its token in Obsidian's per-vault localStorage: never in the vault's files or in `data.json`, so it doesn't sync and doesn't leave with a copied `.obsidian` folder. It isn't encrypted, and **any other plugin in that Obsidian vault can read it**. A plugin runs with full access in any case, so install only ones you trust.
 
+**Paths from the server.** The plugin writes only vault paths it got from the server's manifest, and it checks them against the server's own rule first: a path with `..`, `.` or empty segments, a `\`, control characters, or a leading `/` or `~` is dropped with a warning in the developer console, never written. Obsidian's file API would otherwise resolve `..` and write outside the vault, so a malicious server, or anyone between it and an `http://` connection, can't plant files elsewhere on the device.
+
 **Revoking.** [Revoke](admin.md#device-tokens) a lost device's token in the admin panel: it stops working at once and stays revoked. The plugin's **Remove**, and connecting a vault elsewhere, revoke the token it had (`DELETE /token`).
 
 **Failures reveal nothing.** Every refused request gets the same `401`, whether the token is unknown or revoked, the vault doesn't exist, or the token may not use it. With [`VERBOSE_HTTP_LOGS`](container.md) on, the reason goes to the server log for the sync API; for MCP the log says only "mcp auth failed". With it off, the reason isn't recorded.
@@ -40,7 +42,7 @@ With `VERBOSE_HTTP_LOGS` on there's a line for each request and answer, with the
 
 ## Transport
 
-The server speaks plain HTTP and expects a proxy or a private network in front of it. Tokens and notes travel in the clear otherwise. See [Deployment](deployment.md#network).
+The server speaks plain HTTP and expects a proxy or a private network in front of it. Tokens and notes travel in the clear otherwise. See [Deployment](deployment.md#network). The plugin's settings warn about an `http://` server URL, except to the device itself or a Tailscale address (`100.64.0.0/10`, `*.ts.net`), which WireGuard encrypts.
 
 ## Exposing the server
 
@@ -54,12 +56,13 @@ Whatever is reachable from the internet should pass a proxy that allows the sync
 
 - Off unless `admin` is in `ENABLED_APPS`, which then needs `ADMIN_USER`, `ADMIN_PASSWORD` and `SESSION_SECRET`. Run it in a container of its own that nothing public reaches ([Processes](deployment.md#processes)).
 - Login takes a password and, if `ADMIN_TOTP_SECRET` is set, a TOTP code, in one form with one generic error. A code works once. Without TOTP the password alone protects the panel, which is one more reason to keep it private.
-- After 5 failed logins, every login is refused for 60 seconds, doubling with each further failure. This is global and in memory: someone who can reach the page can keep you locked out until you restart the server, which is one more reason to keep it [off the internet](deployment.md#network).
+- After 5 failed logins, every login is refused for 60 seconds, doubling with each further failure, up to an hour. This is global and in memory: someone who can reach the page can keep you locked out, which is one more reason to keep it [off the internet](deployment.md#network). Restarting the server clears it.
 - The session is an encrypted cookie: `HttpOnly`, `SameSite=Strict`, `Secure`, 12 hours. All forms are protected against CSRF.
+- A `Content-Security-Policy` allows scripts and styles from the panel's own files only, forms that post to the panel only, and no framing. The pages have no inline scripts, handlers or styles.
 
 ## MCP
 
-Off unless `mcp` is in `ENABLED_APPS`: without it the endpoint doesn't exist. Whatever a token may not do with a path reads exactly like a path that isn't there, so it can't probe for files outside its grants. Hidden paths (any segment starting with a dot) can never be granted, listed, read or written. Tool calls are limited to 60 a minute per token. A write can't overwrite a version the token hasn't seen, and results never echo file content.
+Off unless `mcp` is in `ENABLED_APPS`: without it the endpoint doesn't exist. Whatever a token may not do with a path reads exactly like a path that isn't there, so it can't probe for files outside its grants. Hidden paths (any segment starting with a dot) can never be granted, listed, read or written. Tool calls are limited to 60 a minute per token, and a request body to twice `MCP_MAX_WRITE` plus 64 KB, refused before it's read. A write can't overwrite a version the token hasn't seen, and results never echo file content.
 
 Whatever you grant ends up in a third party's hands: what Claude reads goes to Anthropic under your account's terms.
 

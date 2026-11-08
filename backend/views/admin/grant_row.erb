@@ -20,7 +20,7 @@
         <% Grants::MODES.each do |mode| %><option<%= ' selected' if mode == grant[:mode] %>><%= mode %></option><% end %>
       </select>
     </td>
-    <td><button type="button" class="btn danger small" onclick="this.closest('tbody').remove()">Remove</button></td>
+    <td><button type="button" class="btn danger small" data-remove-grant>Remove</button></td>
   </tr>
   <tr class="purpose">
     <td colspan="4">

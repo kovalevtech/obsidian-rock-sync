@@ -10,11 +10,13 @@ class Admin < Sinatra::Base
   SESSION_TTL = 12 * 60 * 60 # s; the cookie expires then, and the server checks admin_at against it too
 
   # Login state of the process (one admin, in memory). A TOTP code works once (the step last used: ROTP's `after:`).
-  # After MAX_FAILURES failures every login is refused until a lockout that doubles with each further failure — refused,
-  # not slowed down: a sleep would hold a Puma thread. A login resets it.
+  # After MAX_FAILURES failures every login is refused until a lockout that doubles with each further failure, up to
+  # MAX_LOCKOUT (else the admin's way in would be a restart) — refused, not slowed down: a sleep would hold a Puma
+  # thread. A login resets it.
   class Gate
     MAX_FAILURES = 5
     LOCKOUT = 60 # s, the first one
+    MAX_LOCKOUT = 60 * 60 # s
 
     def initialize(config, clock: -> { Time.now })
       @user = Digest::SHA256.digest(config.user)
@@ -48,14 +50,17 @@ class Admin < Sinatra::Base
         end
 
         @failures += 1
-        @locked_until = now + (LOCKOUT * 2**(@failures - MAX_FAILURES)) if @failures >= MAX_FAILURES
+        if @failures >= MAX_FAILURES
+          @locked_until = now + [LOCKOUT * 2**[@failures - MAX_FAILURES, 16].min, MAX_LOCKOUT].min
+        end
         known ? 'wrong or used code' : 'wrong user or password'
       end
     end
   end
 
   set :views, File.join(__dir__, 'views', 'admin')
-  # Its stylesheet, at /admin/admin.css: served before the filters, the login page needs it too
+  # Its stylesheet and script, at /admin/admin.css and /admin/admin.js: served before the filters, the login page
+  # needs the stylesheet too
   set :public_folder, File.join(__dir__, 'public', 'admin')
 
   # Material Icons (Apache 2.0) as inline SVG paths: no icon font to load
@@ -112,8 +117,8 @@ class Admin < Sinatra::Base
       "#{value.to_s.delete_suffix('.0')} #{units[exp - 1]}"
     end
 
-    # The stylesheet's URL changes with the file: served with Last-Modified only, a browser keeps an old one for a while
-    def stylesheet = path("/admin.css?v=#{File.mtime(File.join(settings.public_folder, 'admin.css')).to_i}")
+    # A static file's URL changes with the file: served with Last-Modified only, a browser keeps an old one for a while
+    def asset(name) = path("/#{name}?v=#{File.mtime(File.join(settings.public_folder, name)).to_i}")
 
     # The side menu marks the page it's on
     def page?(to) = request.path_info == to
@@ -124,15 +129,19 @@ class Admin < Sinatra::Base
     def copyable(value, shown = value)
       <<~HTML
         <div class="copyable"><code>#{h shown}</code><button type="button" class="copy" title="Copy" aria-label="Copy"
-          data-copy="#{h value}" onclick="navigator.clipboard.writeText(this.dataset.copy)
-          .then(() => { this.classList.add('copied'); this.title = 'Copied' })">#{icon(:copy)}#{icon(:check)}</button></div>
+          data-copy="#{h value}">#{icon(:copy)}#{icon(:check)}</button></div>
       HTML
     end
   end
 
   # Nothing but the login page without a session, unknown routes included
+  # Scripts and styles from its own files only (admin.js wires the few behaviours: no inline handlers), nothing loaded
+  # from elsewhere, forms posting here only, never in a frame
+  CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; " \
+        "frame-ancestors 'none'; base-uri 'none'"
+
   before do
-    headers 'Cache-Control' => 'no-store'
+    headers 'Cache-Control' => 'no-store', 'Content-Security-Policy' => CSP
     next if request.path_info == '/login'
 
     unless signed_in?

@@ -33,7 +33,7 @@ Keep it off the public internet ([why](security.md#admin-panel)).
 
 ## Logging in
 
-User name, password and, with TOTP, the current code, in one form. A code works only once, so a second login within the same 30 seconds has to wait for the next code. After 5 failures, all logins are refused for 60 seconds, doubling with each further failure; restarting the container that serves the panel clears that. The session lasts 12 hours.
+User name, password and, with TOTP, the current code, in one form. A code works only once, so a second login within the same 30 seconds has to wait for the next code. After 5 failures, all logins are refused for 60 seconds, doubling with each further failure up to an hour; restarting the container that serves the panel clears that. The session lasts 12 hours.
 
 ## Vaults
 

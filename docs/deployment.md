@@ -38,6 +38,9 @@ Unset, it's `sync`: MCP and the admin panel are there only when listed. Every co
 x-rock-sync: &rock-sync
   image: ghcr.io/kovalevtech/obsidian-rock-sync:1.2.3
   user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
   volumes:
     - /srv/rock-sync/vaults:/vaults
     - /srv/rock-sync/db:/db

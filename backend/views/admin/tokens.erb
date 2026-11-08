@@ -6,7 +6,7 @@
   <div class="paper-head">
     <h2>Device tokens</h2>
     <form class="inline" method="get" action="<%= path('/tokens') %>">
-      <label class="check"><input type="checkbox" name="revoked" value="1"<%= ' checked' if show_revoked %> onchange="this.form.submit()">Show revoked</label>
+      <label class="check"><input type="checkbox" name="revoked" value="1"<%= ' checked' if show_revoked %> data-submit-on-change>Show revoked</label>
     </form>
     <a class="btn contained" href="<%= path('/connect') %>"><%= icon(:add) %>Connect device</a>
   </div>
@@ -37,7 +37,7 @@
                     <%= csrf_field %><button class="btn small" title="A code giving this device a new token: same name, same vault">Reconnect</button>
                   </form>
                   <form class="inline" method="post" action="<%= path("/tokens/#{device[:id]}/revoke") %>"
-                        onsubmit="return confirm('Revoke the token of <%= h device[:name] %>? It stops working.')">
+                        data-confirm="Revoke the token of <%= h device[:name] %>? It stops working.">
                     <%= csrf_field %><button class="btn danger small">Revoke</button>
                   </form>
                 <% end %>

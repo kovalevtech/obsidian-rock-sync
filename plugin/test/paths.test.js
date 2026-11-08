@@ -1,7 +1,7 @@
 // What syncs, and what the server may merge. Run: npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { syncable, ignored, isMarkdown, mergeable } from '../src/paths.js';
+import { syncable, validPath, ignored, isMarkdown, mergeable } from '../src/paths.js';
 
 test('syncable: every file type and folder', () => {
   for (const path of ['note.md', 'a/b/image.png', 'doc.pdf', 'x.yaml', 'a.zip', 'board.canvas', 'no-extension', 'a/b/.keep']) {
@@ -16,6 +16,28 @@ test('syncable: hidden paths and OS clutter never', () => {
   }
   assert.ok(ignored('a/Thumbs.db'));
   assert.ok(!ignored('Thumbs.db.md'));
+});
+
+test('syncable: hidden behind code points HFS+ ignores too', () => {
+  assert.ok(!syncable('\u200c.obsidian/plugins/x/main.js'));
+  assert.ok(!syncable('a/\ufeff.git/config'));
+  assert.ok(syncable('a\u200cb.md'));
+});
+
+// The server's Vault::Path rule: what a manifest may name. Hidden paths pass (syncable drops them)
+test('validPath: what the server allows', () => {
+  for (const path of ['a.md', 'a/b/.keep', 'Ж/ё.md', ':*[x].md', '-x.md', 'a~b.md', 'x/~a.md', 'git~2/x', 'a b/c d.md',
+    '.obsidian/app.json', 'ё'.repeat(127), `${'a/'.repeat(511)}b`]) {
+    assert.ok(validPath(path), path);
+  }
+});
+
+test('validPath: never a path outside the vault, nor anything else the server refuses', () => {
+  for (const path of ['a\\..\\..\\.zshrc', 'x\\..\\.obsidian\\plugins\\rock-sync\\main.js', 'a\\b.md', '/etc/x', 'a//b',
+    'a/', '', '.', '..', 'a/../b', 'a/./b', '../x', 'a\u0000b', 'a\nb', 'a\u0085b', 'a\u007fb', '~root/x', '~', 'x/git~1/hooks/a',
+    'GIT~1/config', 'git~1 ./x', 'a\ud800b', 'ё'.repeat(128), `${'a/'.repeat(512)}b`, 5, null, undefined]) {
+    assert.ok(!validPath(path), JSON.stringify(path));
+  }
 });
 
 test('mergeable: markdown only, not excalidraw', () => {

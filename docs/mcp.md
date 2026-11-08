@@ -109,7 +109,7 @@ A file that isn't UTF-8 gives an error.
 | `content` / `text` in one call (for base64, the decoded bytes) | `MCP_MAX_WRITE`, 20 MB by default: the plugin's limit on phones, where a bigger file stays on the server |
 | Text `read_file` returns | 1 MB: more wouldn't fit in Claude's context anyway |
 | An image `read_file` returns | 7.5 MB: the API takes 10 MB per image, base64-encoded. Its cost to Claude's context doesn't grow with the file: a big image is scaled down |
-| The request | `MAX_FILE_SIZE`: base64 is a third bigger than the file |
+| The request body | Twice `MCP_MAX_WRITE` plus 64 KB (room for JSON's escapes and base64's extra third), at most `MAX_FILE_SIZE`; refused with `413` before it's read |
 | Tool calls per token | 60 a minute, counted in memory |
 
 Hitting a limit gives a tool error with a message Claude can act on, such as writing a first part and appending the rest.
@@ -123,7 +123,7 @@ Hitting a limit gives a tool error with a message Claude can act on, such as wri
 | `401` + `WWW-Authenticate: Bearer` | No header, or an unknown, revoked or device token |
 | `405` + `Allow: POST` | Any method but `POST` |
 | `404` | Any path below `/mcp` |
-| `413` | Body over `MAX_FILE_SIZE` |
+| `413` | Body over twice `MCP_MAX_WRITE` plus 64 KB, or over `MAX_FILE_SIZE` |
 | `415` | A form or multipart body (`application/x-www-form-urlencoded`, `multipart/*`): never read |
 
 To try it by hand:
