@@ -563,9 +563,10 @@ class McpTest < VaultTest
     def fetch(url, allowed:, max:)
       calls << url
       host = URI.parse(url).host
-      raise Downloader::Refused, "`#{host}` isn't on the user's list of download hosts" unless allowed.call(host)
+      raise Downloader::HostNotApproved.new(host, url) unless allowed.call(host)
 
       body, type = files.fetch(url) { raise Downloader::Refused, "`#{host}` answered 404: nothing downloaded." }
+      raise Downloader::HostNotApproved.new(*type) if body == :redirect # [host, url] of the hop off the list
       raise Downloader::Refused, "too big: at most #{max}" if body.bytesize > max
 
       Downloader::Result.new(body: body.b, content_type: type)
@@ -582,20 +583,29 @@ class McpTest < VaultTest
 
   def tool_names = JSON.parse(rpc('tools/list').body).dig('result', 'tools').map { _1['name'] }
 
-  # Always listed. No hosts on the admin's list: the instructions and the tool say so, nothing is fetched
-  def test_download_file_without_hosts
+  # Always listed, never a word in advance about which hosts work: a download is tried, and a host the user hasn't
+  # approved (none at all, or a redirect's) comes back with the URL and the host for the user to approve
+  def test_download_file_asks_for_approval
     assert_includes tool_names, 'download_file'
-    instructions = -> { JSON.parse(rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }).body).dig('result', 'instructions') }
-    assert_includes instructions.call, 'download hosts only: none yet, so nothing can be downloaded until the user adds hosts in the admin panel'
-    McpTools.downloader = FakeDownloader.new({}, [])
-    assert_includes refused('download_file', url: 'https://files.example.com/a.png', path: 'Inbox/a.png'), 'No download hosts yet'
-    assert_empty McpTools.downloader.calls
-
-    DownloadHosts.add('files.example.com')
-    DownloadHosts.add('*.cdn.example.com')
-    assert_includes instructions.call, 'download hosts only: `*.cdn.example.com`, `files.example.com` (`*.` = its subdomains).'
+    instructions = JSON.parse(rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }).body).dig('result', 'instructions')
+    assert_includes instructions, 'Only hosts the user has approved work: just try'
     tool = JSON.parse(rpc('tools/list').body).dig('result', 'tools').find { _1['name'] == 'download_file' }
     assert_equal %w[base path url vault], tool.dig('inputSchema', 'properties').keys.sort
+
+    url = 'https://files.example.com/a.png'
+    McpTools.downloader = FakeDownloader.new({ url => [PNG, 'image/png'],
+                                               'https://files.example.com/b.png' => [:redirect, ['cdn.example.net', 'https://cdn.example.net/b.png']] }, [])
+    assert_equal "Not downloaded: `files.example.com` isn't a host the user has approved for downloads. Show the user the URL — #{url} — and the host `files.example.com` to approve (the admin panel, Download hosts); once they have, try again.",
+                 refused('download_file', url:, path: 'Inbox/a.png')
+    assert_equal [url], McpTools.downloader.calls, 'tried'
+    refute File.exist?(tree_file('Inbox/a.png'))
+
+    DownloadHosts.add('files.example.com')
+    refute_includes JSON.parse(rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }).body).dig('result', 'instructions'),
+                    'files.example.com', 'the list stays the user\'s'
+    assert_equal 'written', ok('download_file', url:, path: 'Inbox/a.png')['status']
+    assert_includes refused('download_file', url: 'https://files.example.com/b.png', path: 'Inbox/b.png'),
+                    "`cdn.example.net` isn't a host the user has approved for downloads (the URL redirected to https://cdn.example.net/b.png). Show the user the URL — https://files.example.com/b.png — and the host `cdn.example.net`"
   ensure
     McpTools.downloader = nil
   end
@@ -648,7 +658,7 @@ class McpTest < VaultTest
       assert_equal '`Inbox.png` not found in test.', refused('download_file', url: 'https://files.example.com/a.png', path: 'Inbox'),
                    'the URL\'s extension added: another path'
       assert_empty fake.calls
-      assert_includes refused('download_file', url: 'https://evil.example/a.png', path: 'Inbox/a.png'), "`evil.example` isn't on the user's list"
+      assert_includes refused('download_file', url: 'https://evil.example/a.png', path: 'Inbox/a.png'), "`evil.example` isn't a host the user has approved"
       assert_includes refused('download_file', url: 'https://files.example.com/b.png', path: 'Inbox/b.png'), 'answered 404'
       ENV['MCP_MAX_WRITE'] = '10'
       assert_includes refused('download_file', url: 'https://files.example.com/a.png', path: 'Inbox/a.png'), 'too big: at most 10'

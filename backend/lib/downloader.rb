@@ -11,6 +11,17 @@ require 'socket'
 class Downloader
   class Refused < StandardError; end
 
+  # A hop's host the user hasn't approved: the first URL's, or a redirect's (url: that hop's)
+  class HostNotApproved < Refused
+    attr_reader :host, :url
+
+    def initialize(host, url)
+      @host = host
+      @url = url
+      super("`#{host}` isn't an approved download host.")
+    end
+  end
+
   Result = Data.define(:body, :content_type)
 
   MAX_REDIRECTS = 5
@@ -87,8 +98,7 @@ class Downloader
     uri.host = uri.host.downcase.chomp('.')
     return if allowed.call(uri.host)
 
-    raise Refused, "`#{uri.host}` isn't on the user's list of download hosts (the admin panel, Download hosts): ask " \
-                   'the user to add it, or download from a host on the list.'
+    raise HostNotApproved.new(uri.host, uri.to_s)
   end
 
   # The address to connect to: all of the host's must be public (one private answer among them is a reason to stop)

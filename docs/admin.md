@@ -73,9 +73,9 @@ One per [MCP connector](mcp.md). The page is always there; the tokens work where
 
 ## Download hosts
 
-Where Claude's [`download_file`](mcp.md#download_file) may save files from, for all scoped tokens: a host (`example.com`) or its subdomains (`*.example.com`). A pasted URL stands for its host. With none, Claude is told it can't download anything yet.
+Where Claude's [`download_file`](mcp.md#download_file) may save files from, for all scoped tokens: a host (`example.com`) or its subdomains (`*.example.com`). A pasted URL stands for its host. A download from any other host is refused, and Claude shows you its URL and host to add here; then ask it to try again.
 
-Many sites serve files from a CDN on another domain. A download that's refused names the host it needed, so you can add that one too.
+Many sites serve files from a CDN on another domain: the refusal names the host the download was redirected to, so you can add that one too.
 
 ## What's stored
 

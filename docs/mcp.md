@@ -105,7 +105,7 @@ A file that isn't UTF-8 gives an error.
 
 ### `download_file`
 
-Saves a file from the web into the vault: the server downloads it, Claude gets only the result. Downloads come only from the hosts on the admin panel's **Download hosts** page (for all tokens): `example.com` for that host, `*.example.com` for its subdomains. Claude is told the list. While it's empty, the tool refuses every call and says the hosts are yours to add.
+Saves a file from the web into the vault: the server downloads it, Claude gets only the result. Downloads come only from the hosts on the admin panel's **Download hosts** page (for all tokens): `example.com` for that host, `*.example.com` for its subdomains. Claude isn't told the list in advance: it tries, and a download from a host you haven't approved comes back refused with the URL and the host, which Claude shows you. Add the host, ask it to try again.
 
 - **https only**, port 443. Each redirect must lead to a host on the list too; a refusal names the host, so you can add it.
 - **Never a private address:** a host that resolves to a private, loopback, link-local or Tailscale address is refused, whatever the list says, and the server connects to the address it checked. A download can't reach your network, your tailnet or the server itself.

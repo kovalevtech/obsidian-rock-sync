@@ -119,9 +119,12 @@ class DownloaderTest < Minitest::Test
   end
 
   def test_only_hosts_on_the_list
-    assert_includes refused('https://other.example.org/x'), "`other.example.org` isn't on the user's list"
+    refusal = assert_raises(Downloader::HostNotApproved) { fetch('https://other.example.org/x?a=1') }
+    assert_equal ['other.example.org', 'https://other.example.org/x?a=1'], [refusal.host, refusal.url]
+    assert_includes refusal.message, "`other.example.org` isn't an approved download host"
+    assert_raises(Downloader::HostNotApproved) { fetch('https://files.example.com/x', hosts: []) }
     assert_includes refused('https://files.example.com/x', hosts: ['*.example.com']), 'answered 404'
-    assert_includes refused('https://example.com/x', hosts: ['*.example.com']), "isn't on the user's list"
+    assert_includes refused('https://example.com/x', hosts: ['*.example.com']), "isn't an approved download host"
     assert_empty @requests.select { _1[0] != 'files.example.com' }, 'nothing sent to hosts off the list'
   end
 
@@ -150,7 +153,8 @@ class DownloaderTest < Minitest::Test
     assert_equal PNG, fetch('https://files.example.com/to-cdn').body
     assert_equal 'cdn.example.com', @requests.last[0]
     assert_equal PNG, fetch('https://files.example.com/relative').body
-    assert_includes refused('https://files.example.com/to-other'), "`other.example.org` isn't on the user's list"
+    refusal = assert_raises(Downloader::HostNotApproved) { fetch('https://files.example.com/to-other') }
+    assert_equal ['other.example.org', 'https://other.example.org/a.png'], [refusal.host, refusal.url], 'the redirect\'s'
     assert_includes refused('https://files.example.com/to-http'), 'only https'
     assert_includes refused('https://files.example.com/loop'), 'More than 5 redirects'
     assert_includes refused('https://files.example.com/nowhere'), 'redirected nowhere'
