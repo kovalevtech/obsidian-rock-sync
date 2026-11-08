@@ -52,8 +52,8 @@ Every tool takes `vault`, required only when the token's grants are in several v
 |---|---|---|
 | `list_access()` | any grant | `[{ vault, folder, mode, purpose? }]` |
 | `list_folder(path?, recursive = true)` | `r` | `[{ path, etag, size, modified_at, author }]` |
-| `read_file(path)` | `r` | `{ path, etag, content, modified_at, author }` |
-| `write_file(path, content, base?)` | `w` | `{ status, path, etag? }` |
+| `read_file(path)` | `r` | `{ path, etag, content, modified_at, author }`; an image: `{ path, etag, size, mime_type, modified_at, author }` + the image |
+| `write_file(path, content, encoding?, base?)` | `w` | `{ status, path, etag? }` |
 | `append_file(path, text)` | `w` | `{ status, path, etag }` |
 | `delete_file(path, base)` | `rw` | `{ status, path, etag? }` |
 
@@ -67,7 +67,7 @@ Lists files only, without folders, sorted, and only what `r` covers. `path` may 
 
 ### `read_file`
 
-Reads UTF-8 text with no NUL bytes, at most `MCP_MAX_WRITE`. For anything else you get an error with the size and etag.
+Reads UTF-8 text with no NUL bytes, at most 1 MB. An image (PNG, JPEG, GIF or WebP, known by its bytes, not its name) up to 7.5 MB comes as MCP image content, so Claude sees it, after its JSON with `size` and `mime_type` in place of `content`. For anything else you get an error with the size and etag.
 
 ### `write_file`
 
@@ -79,6 +79,8 @@ Reads UTF-8 text with no NUL bytes, at most `MCP_MAX_WRITE`. For anything else y
 | `stale` | `base` isn't the current version; nothing written |
 
 Without `base` it only creates. With `base` it's a strict check and never merges. `stale` carries the current etag only where the token may read, so a token can't blindly overwrite a version it can't see. New subfolders are created as needed.
+
+`encoding: base64` writes a binary file, such as an image or a PDF: `content` is its bytes as base64, line breaks allowed, no `data:` prefix. Invalid base64 gives an error, and nothing is written. From claude.ai, Claude types the base64 out itself, token by token, so in practice that means small files.
 
 ### `append_file`
 
@@ -104,7 +106,10 @@ A file that isn't UTF-8 gives an error.
 
 | Limit | Value |
 |---|---|
-| `content` / `text` in one call, and what `read_file` returns | `MCP_MAX_WRITE`, 1 MB by default |
+| `content` / `text` in one call (for base64, the decoded bytes) | `MCP_MAX_WRITE`, 20 MB by default: the plugin's limit on phones, where a bigger file stays on the server |
+| Text `read_file` returns | 1 MB: more wouldn't fit in Claude's context anyway |
+| An image `read_file` returns | 7.5 MB: the API takes 10 MB per image, base64-encoded. Its cost to Claude's context doesn't grow with the file: a big image is scaled down |
+| The request | `MAX_FILE_SIZE`: base64 is a third bigger than the file |
 | Tool calls per token | 60 a minute, counted in memory |
 
 Hitting a limit gives a tool error with a message Claude can act on, such as writing a first part and appending the rest.

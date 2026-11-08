@@ -15,6 +15,13 @@ module McpTools
   class Refused < StandardError; end
 
   RATE = RateLimit.new(limit: 60, period: 60) # tool calls per token
+  READ_MAX = 1024 * 1024 # bytes: the most text read_file returns (it goes into Claude's context: already ~250k tokens)
+  # Bytes: the most an image may be — the API takes 10 MB per image, base64-encoded. Not READ_MAX: an image costs
+  # Claude at most a few thousand tokens whatever its size (scaled down to its resolution limit)
+  IMAGE_MAX = 10 * 1024 * 1024 / 4 * 3
+  # Images read_file returns as MCP image content (Claude sees them), known by their first bytes; WebP: see image_type
+  IMAGES = { "\x89PNG\r\n\x1A\n".b => 'image/png', "\xFF\xD8\xFF".b => 'image/jpeg', 'GIF87a'.b => 'image/gif',
+             'GIF89a'.b => 'image/gif' }.freeze
   ETAG = { type: 'string', pattern: '^[0-9a-f]{40}$' }.freeze
   VAULT = { type: 'string', description: 'Vault name, from list_access; needed only when your grants are in several vaults' }.freeze
 
@@ -49,7 +56,8 @@ module McpTools
   def self.ok(result) = MCP::Tool::Response.new([{ type: 'text', text: JSON.generate(result) }])
   def self.error(message) = MCP::Tool::Response.new([{ type: 'text', text: message }], error: true)
 
-  # Every tool call: the rate limit, then the size of what it writes (before the vault is touched), then the tool.
+  # Every tool call: the rate limit, then the size of what it writes (before the vault is touched), then the tool: its
+  # result as JSON text, or a Response of its own (read_file's image).
   # texts: { argument name => text }
   def self.call(server_context, texts = {})
     token = server_context[:token]
@@ -61,9 +69,32 @@ module McpTools
       return error("`#{name}` is #{text.bytesize} bytes, at most #{Config.mcp_max_write} per call: write a first part, " \
                    'then append_file the rest.')
     end
-    ok(yield(token))
+    result = yield(token)
+    result.is_a?(MCP::Tool::Response) ? result : ok(result)
   rescue Refused => e
     error(e.message)
+  end
+
+  # write_file's base64 content → its bytes: whitespace dropped (line breaks), then strict. The size is known from the
+  # length, so a too big one is refused undecoded
+  def self.decode64(content)
+    data = content.delete(" \t\r\n")
+    size = (data.size / 4 * 3) - data[-2..].to_s.count('=')
+    if size > Config.mcp_max_write
+      raise Refused, "`content` is #{size} bytes, at most #{Config.mcp_max_write} per call: too big to write here."
+    end
+
+    data.unpack1('m0')
+  rescue ArgumentError
+    raise Refused, '`content` isn\'t valid base64 (`encoding: base64`): nothing written.'
+  end
+
+  # 'image/…' when the bytes are an image read_file shows, else nil
+  def self.image_type(bytes)
+    head = bytes.byteslice(0, 12).b
+    return 'image/webp' if head.start_with?('RIFF') && head.byteslice(8, 4) == 'WEBP'
+
+    IMAGES.find { |magic, _| head.start_with?(magic) }&.last
   end
 
   # The vault a call means: the one named (one the token has grants in), else the token's only one
@@ -171,8 +202,8 @@ module McpTools
   READ_FILE = MCP::Tool.define(
     name: 'read_file',
     description: <<~TEXT,
-      Read a text file (a note) in a folder you may read. Without an extension `.md` is added.
-      Result: JSON `{"path", "etag", "content", "modified_at", "author": {"kind", "name"}}` (the last commit touching it, as for list_folder). Pass the etag as `base` to write_file / delete_file. A binary file can't be read: the error gives its size and etag.
+      Read a file in a folder you may read: a text file (a note), or an image (PNG, JPEG, GIF, WebP; up to 7.5 MB), which you then see. Without an extension `.md` is added.
+      Result: JSON `{"path", "etag", "content", "modified_at", "author": {"kind", "name"}}` (the last commit touching it, as for list_folder); for an image `size` and `mime_type` instead of `content`, then the image. Pass the etag as `base` to write_file / delete_file. Other binary files can't be read: the error gives their size and etag.
     TEXT
     input_schema: {
       properties: {
@@ -191,17 +222,25 @@ module McpTools
       rescue Vault::NotFound
         raise McpTools.not_found(vault, rel)
       end
-      if content.bytesize > Config.mcp_max_write
-        raise Refused, "`#{rel}` is #{content.bytesize} bytes (etag #{etag}), at most #{Config.mcp_max_write} can be read."
+      size = content.bytesize
+      if (mime_type = McpTools.image_type(content))
+        raise Refused, "`#{rel}` is an image of #{size} bytes (etag #{etag}), at most #{IMAGE_MAX} can be read." if size > IMAGE_MAX
+      else
+        raise Refused, "`#{rel}` is #{size} bytes (etag #{etag}), at most #{READ_MAX} can be read." if size > READ_MAX
+
+        text = content.force_encoding(Encoding::UTF_8)
+        unless text.valid_encoding? && !text.include?("\0")
+          raise Refused, "`#{rel}` is binary (#{size} bytes, etag #{etag}): only text files and images (PNG, JPEG, " \
+                         'GIF, WebP) can be read.'
+        end
       end
 
-      text = content.force_encoding(Encoding::UTF_8)
-      unless text.valid_encoding? && !text.include?("\0")
-        raise Refused, "`#{rel}` is binary (#{content.bytesize} bytes, etag #{etag}): only text files can be read."
-      end
+      commit = McpTools.commit_info(vault.git.last_commits([rel], under: rel)[rel])
+      next { path: rel, etag:, content: text, **commit } unless mime_type
 
-      commit = vault.git.last_commits([rel], under: rel)[rel]
-      { path: rel, etag:, content: text, **McpTools.commit_info(commit) }
+      info = JSON.generate({ path: rel, etag:, size:, mime_type:, **commit })
+      MCP::Tool::Response.new([{ type: 'text', text: info },
+                               { type: 'image', data: [content].pack('m0'), mimeType: mime_type }])
     end
   end
 
@@ -211,13 +250,15 @@ module McpTools
       Create a new file in the user's Obsidian vault — or replace one you read.
       Without `base`: creates the file only if nothing is at `path` yet. If something is, the result is `exists` and nothing is written: pick another name, read_file it, or append_file to it.
       With `base`: replaces the file, only if it is still that version. Pass only an `etag` from read_file / list_folder or an earlier result for this same path — never guess one. If the file changed since (or is gone), the result is `stale` and nothing is written: read_file it again (`stale` carries the current etag where you may read), or tell the user. Nothing is merged.
-      Path: inside a folder you may write to (see list_access), with a readable file name, like `Inbox/Call with Anna 2023-03-14.md`. Subfolders are created as needed. Without an extension `.md` is added. Content: the whole file, Markdown for notes.
+      Path: inside a folder you may write to (see list_access), with a readable file name, like `Inbox/Call with Anna 2023-03-14.md`. Subfolders are created as needed. Without an extension `.md` is added. Content: the whole file, Markdown for notes. A binary file (an image, a PDF): its bytes as base64 in `content`, with `encoding: base64` and the file's extension in `path`.
       Result: JSON `{"status", "path", "etag"}` — never the file's content. status: written, unchanged (that exact content was there), exists, stale; etag after written / unchanged, and after stale where you may read.
     TEXT
     input_schema: {
       properties: {
         path: { type: 'string', description: 'Vault path, e.g. `Inbox/Idea.md`' },
-        content: { type: 'string', description: 'The whole file' },
+        content: { type: 'string', description: 'The whole file: text, or base64 with `encoding: base64`' },
+        encoding: { type: 'string', enum: %w[text base64],
+                    description: '`base64` for a binary file: `content` is its bytes as plain base64 (no `data:` prefix); default `text`' },
         base: ETAG.merge(description: 'The etag of the version you are replacing, from read_file or an earlier result'),
         vault: VAULT
       },
@@ -225,8 +266,10 @@ module McpTools
       additionalProperties: false
     },
     annotations: { read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: false }
-  ) do |path:, content:, server_context:, base: nil, vault: nil|
-    McpTools.call(server_context, content:) do |token|
+  ) do |path:, content:, server_context:, encoding: 'text', base: nil, vault: nil|
+    binary = encoding == 'base64'
+    McpTools.call(server_context, binary ? {} : { content: }) do |token|
+      content = McpTools.decode64(content) if binary # its size checked first: before the vault, as a text's
       vault, rel = McpTools.file(token, vault, path, :w)
       # mergeable: false — a stale base is stale, never merged
       status, etag = WriteFile.call(vault, rel, content, if_match: base, if_none_match: base ? nil : '*',

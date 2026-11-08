@@ -286,15 +286,43 @@ class McpTest < VaultTest
   end
 
   def test_read_file_refuses_binary_and_big_files
-    png = commit_file('Journal/a.png', "\x89PNG\xff\xfe".b)
-    assert_equal "`Journal/a.png` is binary (6 bytes, etag #{png}): only text files can be read.", refused('read_file', path: 'Journal/a.png')
+    png = commit_file('Journal/a.png', "\x89PNG\xff\xfe".b) # not a PNG's whole signature
+    assert_equal "`Journal/a.png` is binary (6 bytes, etag #{png}): only text files and images (PNG, JPEG, GIF, WebP) can be read.",
+                 refused('read_file', path: 'Journal/a.png')
     commit_file('Journal/nul.txt', "a\0b")
     assert_includes refused('read_file', path: 'Journal/nul.txt'), 'is binary (3 bytes'
-    big = commit_file('Journal/big.md', 'x' * 11)
-    ENV['MCP_MAX_WRITE'] = '10'
-    assert_equal "`Journal/big.md` is 11 bytes (etag #{big}), at most 10 can be read.", refused('read_file', path: 'Journal/big.md')
-  ensure
-    ENV.delete('MCP_MAX_WRITE')
+    big = commit_file('Journal/big.md', 'x' * (McpTools::READ_MAX + 1))
+    assert_equal "`Journal/big.md` is #{McpTools::READ_MAX + 1} bytes (etag #{big}), at most #{McpTools::READ_MAX} can be read.",
+                 refused('read_file', path: 'Journal/big.md')
+  end
+
+  PNG = "\x89PNG\r\n\x1A\n\0\0\0\rIHDR\xff".b
+  IMAGES = {
+    'a.png' => [PNG, 'image/png'], 'b.jpg' => ["\xFF\xD8\xFF\xE0\0\x10JFIF".b, 'image/jpeg'],
+    'c.gif' => ['GIF89a..'.b, 'image/gif'], 'd.md' => ['GIF87a..'.b, 'image/gif'],
+    'e.webp' => ["RIFF\x10\0\0\0WEBPVP8 ".b, 'image/webp']
+  }.freeze
+
+  # Images: their JSON (no content), then the image itself, over READ_MAX too; known by their bytes, not the name
+  def test_read_file_shows_images
+    IMAGES.each do |name, (bytes, mime_type)|
+      path = "Journal/#{name}"
+      etag = commit_file(path, bytes)
+      result = JSON.parse(rpc('tools/call', { name: 'read_file', arguments: { path: } }).body)['result']
+      refute result['isError'], result
+      info, image = result['content']
+      assert_equal 'text', info['type']
+      assert_equal({ 'path' => path, 'etag' => etag, 'size' => bytes.bytesize, 'mime_type' => mime_type,
+                     'author' => { 'kind' => 'unknown', 'name' => 'sync' } }, JSON.parse(info['text']).except('modified_at'))
+      assert_equal({ 'type' => 'image', 'mimeType' => mime_type }, image.except('data'))
+      assert_equal bytes, image['data'].unpack1('m0')
+    end
+
+    commit_file('Journal/mid.png', PNG + ("\0" * McpTools::READ_MAX))
+    assert_equal McpTools::READ_MAX + PNG.bytesize, ok('read_file', path: 'Journal/mid.png')['size']
+    big = commit_file('Journal/big.png', PNG + ("\0" * McpTools::IMAGE_MAX))
+    assert_equal "`Journal/big.png` is an image of #{McpTools::IMAGE_MAX + PNG.bytesize} bytes (etag #{big}), at most #{McpTools::IMAGE_MAX} can be read.",
+                 refused('read_file', path: 'Journal/big.png')
   end
 
   def test_list_folder_shows_only_what_is_readable
@@ -462,6 +490,42 @@ class McpTest < VaultTest
     assert_includes refused('write_file', path: 'Archive/a.md', content: 'x' * 11), 'bytes', 'checked before the path'
     assert_equal before, commit_count
     assert_equal 'written', ok('write_file', path: 'Inbox/a.md', content: 'x' * 10)['status']
+  ensure
+    ENV.delete('MCP_MAX_WRITE')
+  end
+
+  # encoding: base64 — the bytes as they are, line breaks in the base64 tolerated; the same rules as for text
+  def test_write_file_base64
+    bytes = PNG + "\x80\xfe\0".b
+    data = [bytes].pack('m0')
+    result = ok('write_file', path: 'Journal/pic.png', content: data.scan(/.{1,8}/).join("\n"), encoding: 'base64')
+    assert_equal({ 'status' => 'written', 'path' => 'Journal/pic.png', 'etag' => blob(bytes) }, result)
+    assert_equal bytes, File.binread(tree_file('Journal/pic.png'))
+    assert_equal bytes, git('cat-file', 'blob', "HEAD:Journal/pic.png").b
+    assert_equal 'unchanged', ok('write_file', path: 'Journal/pic.png', content: data, encoding: 'base64', base: blob(bytes))['status']
+    assert_equal 'exists', ok('write_file', path: 'Journal/pic.png', content: 'AAEC', encoding: 'base64')['status']
+    assert_equal 'written', ok('write_file', path: 'Journal/pic.png', content: 'AAEC', encoding: 'base64', base: blob(bytes))['status']
+    assert_equal "\0\1\2".b, File.binread(tree_file('Journal/pic.png'))
+    assert_equal 'text', ok('write_file', path: 'Journal/t.txt', content: 'text', encoding: 'text').then { File.read(tree_file(_1['path'])) }
+
+    before = commit_count
+    ["data:image/png;base64,#{data}", 'AAE', 'AA=A', 'AA*A'].each do |bad|
+      assert_equal "`content` isn't valid base64 (`encoding: base64`): nothing written.",
+                   refused('write_file', path: 'Journal/bad.png', content: bad, encoding: 'base64')
+    end
+    assert_equal before, commit_count
+    refute File.exist?(tree_file('Journal/bad.png'))
+  end
+
+  def test_size_cap_base64
+    ENV['MCP_MAX_WRITE'] = '10'
+    before = commit_count
+    [11, 12, 13].each do |size|
+      assert_equal "`content` is #{size} bytes, at most 10 per call: too big to write here.",
+                   refused('write_file', path: 'Archive/a.bin', content: ['x' * size].pack('m0'), encoding: 'base64')
+    end
+    assert_equal before, commit_count
+    [8, 9, 10].each { assert_equal 'written', ok('write_file', path: "Inbox/#{_1}.bin", content: ['x' * _1].pack('m0'), encoding: 'base64')['status'] }
   ensure
     ENV.delete('MCP_MAX_WRITE')
   end

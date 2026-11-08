@@ -33,7 +33,7 @@ For more devices and vaults, use the [admin panel](admin.md). There are no comma
 | `ENABLED_APPS` | `sync` | What this container serves, comma-separated: `sync` (the sync API), `mcp` (the [MCP](mcp.md) endpoint), `admin` (the [admin panel](admin.md#turning-it-on)). See [Processes](deployment.md#processes) |
 | `ALLOWED_VAULTS` | all | The vaults this container's sync API serves, comma-separated (`notes`). Other vaults' device tokens get `401`, their connection codes are refused and used up. For a container others reach ([Exposing](exposing.md#what-to-expose)). MCP isn't limited by it: its tokens' grants are |
 | `MAX_FILE_SIZE` | `104857600` | Largest request body in bytes (100 MB) |
-| `MCP_MAX_WRITE` | `1048576` | The most one MCP call may write or read, in bytes (1 MB) |
+| `MCP_MAX_WRITE` | `20971520` | The most one MCP call may write, in bytes (20 MB) |
 | `MCP_BASE_URL` | | The origin Claude reaches the server at, for a new token's MCP URL in the admin panel. Empty: `PUBLIC_URL` |
 | `VERBOSE_HTTP_LOGS` | off | `true` or `1`: a log line for every request and answer, including why a request was refused. For debugging, not for production: it logs paths and most headers |
 | `INIT_VAULT_NAME`, `INIT_VAULT_CODE` | | [First run](#first-run) |
