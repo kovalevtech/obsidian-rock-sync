@@ -46,7 +46,7 @@ Whatever isn't granted looks exactly like what isn't there: "`X` not found in no
 
 ## Tools
 
-Every tool takes `vault`, required only when the token's grants are in several vaults. Paths are relative to the vault. A path with no extension gets `.md`.
+Every tool takes `vault`, required only when the token's grants are in several vaults. Paths are relative to the vault. A path with no extension gets `.md`, except for `download_file`.
 
 | Tool | Needs | Result |
 |---|---|---|
@@ -56,6 +56,7 @@ Every tool takes `vault`, required only when the token's grants are in several v
 | `write_file(path, content, encoding?, base?)` | `w` | `{ status, path, etag? }` |
 | `append_file(path, text)` | `w` | `{ status, path, etag }` |
 | `delete_file(path, base)` | `rw` | `{ status, path, etag? }` |
+| `download_file(url, path, base?)` | `w` | `{ status, path, etag?, size, content_type }`; only while there are [download hosts](#download_file) |
 
 - **`etag`** is the file's git blob hash.
 - **`modified_at`** is the last commit touching the file, in UTC.
@@ -102,6 +103,18 @@ A file that isn't UTF-8 gives an error.
 | `gone` | Already gone, which counts as success |
 | `stale` | Changed since `base`; nothing deleted. Carries the current etag |
 
+### `download_file`
+
+Saves a file from the web into the vault: the server downloads it, Claude gets only the result. It's there only while the admin panel lists **download hosts** (Scoped tokens page, for all tokens), and downloads come from those hosts only: `example.com` for that host, `*.example.com` for its subdomains. Claude is told the list.
+
+- **https only**, port 443. Each redirect must lead to a host on the list too; a refusal names the host, so you can add it.
+- **Never a private address:** a host that resolves to a private, loopback, link-local or Tailscale address is refused, whatever the list says, and the server connects to the address it checked. A download can't reach your network, your tailnet or the server itself.
+- **Size:** at most `MCP_MAX_WRITE`, stopped as soon as it's over. 60 seconds at most, 2 downloads at a time.
+- **Path:** without an extension, it gets the URL's, else one from the file's type. `base` works as for `write_file`: without it the file is only created.
+- **History:** the commit is `DOWNLOAD <path>`, with a `Source:` trailer, the URL without its query.
+
+**What the list is for.** Whatever is in a URL reaches its host, so text Claude reads (a web page, a note) could talk it into a URL carrying your notes. Add only hosts you trust with what Claude can read, and not hosting where anyone can get a subdomain and its logs.
+
 ## Limits
 
 | Limit | Value |
@@ -111,6 +124,7 @@ A file that isn't UTF-8 gives an error.
 | An image `read_file` returns | 7.5 MB: the API takes 10 MB per image, base64-encoded. Its cost to Claude's context doesn't grow with the file: a big image is scaled down |
 | The request body | Twice `MCP_MAX_WRITE` plus 64 KB (room for JSON's escapes and base64's extra third), at most `MAX_FILE_SIZE`; refused with `413` before it's read |
 | Tool calls per token | 60 a minute, counted in memory |
+| Downloads | 2 at a time per container, 60 seconds each |
 
 Hitting a limit gives a tool error with a message Claude can act on, such as writing a first part and appending the rest.
 

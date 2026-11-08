@@ -288,6 +288,20 @@ class Admin < Sinatra::Base
     redirect "/scoped/#{params['id'].to_i}"
   end
 
+  # Download hosts (MCP's download_file, DownloadHosts): a list on the Scoped tokens page
+  post '/hosts' do
+    _, @hosts_error = DownloadHosts.add(params['host'])
+    redirect '/scoped' unless @hosts_error
+
+    @host_typed = params['host'].to_s
+    halt 422, erb(:scoped)
+  end
+
+  post '/hosts/:id/remove' do
+    DownloadHosts.remove(params['id'].to_i)
+    redirect '/scoped'
+  end
+
   helpers do
     def scoped_token = Devices.find(params['id'].to_i, kind: 'scoped') || halt(404)
 

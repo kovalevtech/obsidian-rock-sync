@@ -557,6 +557,115 @@ class McpTest < VaultTest
     ENV.delete('MCP_MAX_WRITE')
   end
 
+  # download_file's fetches, made up: url → [body, content type]; every call recorded. The network side is
+  # downloader_test.rb's
+  FakeDownloader = Struct.new(:files, :calls) do
+    def fetch(url, allowed:, max:)
+      calls << url
+      host = URI.parse(url).host
+      raise Downloader::Refused, "`#{host}` isn't on the user's list of download hosts" unless allowed.call(host)
+
+      body, type = files.fetch(url) { raise Downloader::Refused, "`#{host}` answered 404: nothing downloaded." }
+      raise Downloader::Refused, "too big: at most #{max}" if body.bytesize > max
+
+      Downloader::Result.new(body: body.b, content_type: type)
+    end
+  end
+
+  def with_downloads(files = {})
+    DownloadHosts.add('files.example.com')
+    McpTools.downloader = FakeDownloader.new(files, [])
+    yield McpTools.downloader
+  ensure
+    McpTools.downloader = nil
+  end
+
+  def tool_names = JSON.parse(rpc('tools/list').body).dig('result', 'tools').map { _1['name'] }
+
+  # No hosts on the admin's list: no tool, and nothing about downloads in the instructions
+  def test_download_file_only_with_hosts
+    refute_includes tool_names, 'download_file'
+    instructions = -> { JSON.parse(rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }).body).dig('result', 'instructions') }
+    refute_includes instructions.call, 'download_file'
+    res = nil
+    capture_io { res = rpc('tools/call', { name: 'download_file', arguments: { url: 'https://files.example.com/a.png', path: 'Inbox/a.png' } }) }
+    assert_match(/Tool not found/, JSON.parse(res.body).dig('error', 'data').to_s, 'unknown without hosts')
+
+    DownloadHosts.add('files.example.com')
+    DownloadHosts.add('*.cdn.example.com')
+    assert_includes tool_names, 'download_file'
+    assert_includes instructions.call, 'these hosts only, the user\'s list (`*.` = its subdomains): `*.cdn.example.com`, `files.example.com`.'
+    tool = JSON.parse(rpc('tools/list').body).dig('result', 'tools').find { _1['name'] == 'download_file' }
+    assert_equal %w[base path url vault], tool.dig('inputSchema', 'properties').keys.sort
+  end
+
+  def test_download_file
+    url = 'https://files.example.com/pics/a.png?sig=secret#x'
+    with_downloads(url => [PNG, 'image/png']) do |fake|
+      result = ok('download_file', url:, path: 'Inbox/a.png')
+      assert_equal({ 'status' => 'written', 'path' => 'Inbox/a.png', 'etag' => blob(PNG), 'size' => PNG.bytesize,
+                     'content_type' => 'image/png' }, result)
+      assert_equal PNG, File.binread(tree_file('Inbox/a.png'))
+      assert_equal 'DOWNLOAD Inbox/a.png', last_commit_message
+      assert_equal "Client: mcp\nSource: https://files.example.com/pics/a.png", git('log', '-1', '--format=%(trailers)').strip
+      assert_equal 'claude <claude@token>', git('log', '-1', '--format=%an <%ae>').strip
+      assert_equal [url], fake.calls
+
+      assert_equal 'unchanged', ok('download_file', url:, path: 'Inbox/a.png')['status']
+      fake.files[url] = [PNG + 'x', 'image/png']
+      assert_equal({ 'status' => 'exists', 'path' => 'Inbox/a.png' }, ok('download_file', url:, path: 'Inbox/a.png'))
+      assert_equal({ 'status' => 'stale', 'path' => 'Journal/a.png' }.merge('etag' => commit_file('Journal/a.png', 'old')),
+                   ok('download_file', url:, path: 'Journal/a.png', base: blob('older')))
+      assert_equal 'written', ok('download_file', url:, path: 'Journal/a.png', base: blob('old'))['status']
+      assert_equal PNG + 'x', File.binread(tree_file('Journal/a.png'))
+    end
+  end
+
+  # No extension: the URL's, else the type's; neither → an error, nothing fetched twice, nothing written
+  def test_download_file_extension
+    files = { 'https://files.example.com/x/diagram.SVG' => ['<svg/>', 'image/svg+xml'],
+              'https://files.example.com/photo' => ['jpeg', 'image/jpeg; charset=binary'],
+              'https://files.example.com/blob' => ['?', 'application/octet-stream'] }
+    with_downloads(files) do
+      assert_equal 'Inbox/Diagram.svg', ok('download_file', url: files.keys[0], path: 'Inbox/Diagram')['path']
+      assert_equal 'Inbox/Photo.jpg', ok('download_file', url: files.keys[1], path: 'Inbox/Photo')['path']
+      assert_equal 'Inbox/Named.png', ok('download_file', url: files.keys[1], path: 'Inbox/Named.png')['path']
+      before = commit_count
+      assert_equal "`Inbox/Blob` needs an extension: neither the URL nor the file's type (application/octet-stream) gives one. Nothing written.",
+                   refused('download_file', url: files.keys[2], path: 'Inbox/Blob')
+      assert_equal before, commit_count
+    end
+  end
+
+  # What the token may not write reads as not found, and nothing is fetched for it; the downloader's refusals as they are
+  def test_download_file_refusals
+    with_downloads('https://files.example.com/a.png' => [PNG, 'image/png']) do |fake|
+      assert_equal '`Archive/a.png` not found in test.', refused('download_file', url: 'https://files.example.com/a.png', path: 'Archive/a.png')
+      assert_equal '`Elsewhere/a.png` not found in test.', refused('download_file', url: 'https://files.example.com/a.png', path: 'Elsewhere/a.png')
+      assert_equal '`.obsidian/a.png` not found in test.', refused('download_file', url: 'https://files.example.com/a.png', path: '.obsidian/a.png')
+      assert_equal '`Inbox` is a folder: name a file inside it.', refused('download_file', url: 'https://files.example.com/photo', path: 'Inbox')
+      assert_equal '`Inbox.png` not found in test.', refused('download_file', url: 'https://files.example.com/a.png', path: 'Inbox'),
+                   'the URL\'s extension added: another path'
+      assert_empty fake.calls
+      assert_includes refused('download_file', url: 'https://evil.example/a.png', path: 'Inbox/a.png'), "`evil.example` isn't on the user's list"
+      assert_includes refused('download_file', url: 'https://files.example.com/b.png', path: 'Inbox/b.png'), 'answered 404'
+      ENV['MCP_MAX_WRITE'] = '10'
+      assert_includes refused('download_file', url: 'https://files.example.com/a.png', path: 'Inbox/a.png'), 'too big: at most 10'
+      refute File.exist?(tree_file('Inbox/a.png'))
+      DownloadHosts.remove(DB[:download_hosts].get(:id))
+    end
+  ensure
+    ENV.delete('MCP_MAX_WRITE')
+  end
+
+  # A refused download gives its slot back
+  def test_download_slots_come_back
+    with_downloads('https://files.example.com/a.png' => [PNG, 'image/png']) do
+      (McpTools::DOWNLOAD_SLOTS + 1).times { refused('download_file', url: 'https://files.example.com/b.png', path: 'Inbox/b.png') }
+      assert_equal 'written', ok('download_file', url: 'https://files.example.com/a.png', path: 'Inbox/a.png')['status']
+    end
+  end
+
   def test_rate_limit_per_token
     _, other = Devices.create_scoped(name: 'other')
     60.times { ok('list_access') }

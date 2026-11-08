@@ -30,15 +30,17 @@ module McpTools
     exception_reporter: ->(e, _context) { warn "vault-sync: MCP tool failed: #{e.class}: #{e.message}" }
   )
 
-  # One per request: no sessions, the token is the request's
+  # One per request: no sessions, the token is the request's. download_file only while the admin lists hosts for it
   def self.server(token)
-    MCP::Server.new(name: 'vault-sync', version: '1', instructions: instructions(token), tools: TOOLS,
-                    server_context: { token: }, capabilities: { tools: {} }, configuration: CONFIGURATION)
+    hosts = DownloadHosts.hosts
+    MCP::Server.new(name: 'vault-sync', version: '1', instructions: instructions(token, hosts),
+                    tools: hosts.any? ? TOOLS + [DOWNLOAD_FILE] : TOOLS, server_context: { token: },
+                    capabilities: { tools: {} }, configuration: CONFIGURATION)
   end
 
   # Told at initialize: where Claude may read and write and what for, without a call to list_access. A purpose follows
-  # its grant, its further lines indented under it
-  def self.instructions(token)
+  # its grant, its further lines indented under it. hosts: download_file's (DownloadHosts)
+  def self.instructions(token, hosts = [])
     grants = token.grants.map do |g|
       purpose = g.purpose.empty? ? '' : " — #{g.purpose.gsub("\n", "\n  ")}"
       "- #{g.vault}: `#{label(g.folder)}` (#{g.mode})#{purpose}"
@@ -48,6 +50,7 @@ module McpTools
       #{grants.any? ? grants.join("\n") : '- none: nothing can be read or written yet'}
       The text after a grant is the user's own note on what that folder is for and how to use it: follow it. list_access returns the same list. Paths are vault paths inside these folders, like `Inbox/Idea.md`. #{token.vaults.size > 1 ? 'Your grants are in several vaults: name one in every tool call (`vault`).' : 'Tools take a `vault` argument; with grants in one vault it can be left out.'}
       Use list_folder / read_file to look around, append_file to add to a note ("add this to …"), write_file without `base` to create a new one, with `base` (the etag from read_file) to replace one, delete_file with `base` to remove one. Every file comes with its last commit's author: `device` = the user edited it on a device, `token` = a connector like you wrote it.
+      #{"download_file saves a file from the web (an image, a PDF) into a folder you may write to, from an https URL on these hosts only, the user's list (`*.` = its subdomains): #{hosts.map { "`#{_1}`" }.join(', ')}." if hosts.any?}
     TEXT
   end
 
@@ -136,6 +139,66 @@ module McpTools
   end
 
   def self.author(token) = Vault::Author.new(name: token.name, kind: 'token', client: Vault::Author::MCP_CLIENT)
+
+  # download_file's fetches (Downloader); tests set their own
+  class << self
+    attr_writer :downloader
+
+    def downloader = @downloader ||= Downloader.new
+  end
+
+  # Downloads running at once in this process: each holds a Puma thread for up to Downloader::DEADLINE
+  DOWNLOAD_SLOTS = 2
+  DOWNLOADS = Mutex.new
+  @downloads = 0
+
+  def self.download_slot
+    taken = DOWNLOADS.synchronize { @downloads < DOWNLOAD_SLOTS && (@downloads += 1) }
+    raise Refused, 'Another download is running: try again in a minute.' unless taken
+
+    yield
+  ensure
+    DOWNLOADS.synchronize { @downloads -= 1 } if taken
+  end
+
+  # A downloaded file's extension when its path has none: the URL's, else its Content-Type's
+  EXTENSIONS = {
+    'image/png' => '.png', 'image/jpeg' => '.jpg', 'image/gif' => '.gif', 'image/webp' => '.webp',
+    'image/svg+xml' => '.svg', 'image/avif' => '.avif', 'image/heic' => '.heic', 'application/pdf' => '.pdf',
+    'text/plain' => '.txt', 'text/markdown' => '.md', 'text/html' => '.html', 'text/csv' => '.csv',
+    'application/json' => '.json', 'application/zip' => '.zip', 'audio/mpeg' => '.mp3', 'audio/mp4' => '.m4a',
+    'video/mp4' => '.mp4'
+  }.freeze
+
+  def self.url_extension(url)
+    ext = File.extname(URI.parse(url.to_s.strip).path.to_s).downcase
+    ext.match?(/\A\.[a-z0-9]{1,8}\z/) ? ext : nil
+  rescue URI::InvalidURIError
+    nil
+  end
+
+  def self.type_extension(content_type) = EXTENSIONS[content_type.to_s.split(';').first.to_s.strip.downcase]
+
+  # A download's Source trailer: where it came from, without its query (signed URLs carry secrets there)
+  def self.source(url)
+    uri = URI.parse(url.to_s.strip)
+    "https://#{uri.host}#{uri.path}"[0, 500]
+  end
+
+  # download_file's path: as given, an extension from the URL if it has none; then the access check, before anything
+  # is fetched
+  def self.download_path(token, vault, path, url)
+    rel = relative(vault, path)
+    rel = relative(vault, "#{rel}#{url_extension(url)}") if File.extname(rel).empty? && url_extension(url)
+    writable(token, vault, rel)
+  end
+
+  def self.writable(token, vault, rel)
+    raise not_found(vault, rel) unless Access.allowed?(token.grants, vault.name, rel, :w)
+    raise Refused, "`#{rel}` is a folder: name a file inside it." if File.directory?(vault.file(rel))
+
+    rel
+  end
 
   # { modified_at, author } of a file from its last commit (Git#last_commits)
   def self.commit_info(commit)
@@ -335,6 +398,58 @@ module McpTools
       vault, rel = McpTools.file(token, vault, path, :r, :w)
       status, etag = DeleteFile.call(vault, rel, if_match: base, author: McpTools.author(token))
       status == :stale ? { status:, path: rel, etag: } : { status:, path: rel }
+    end
+  end
+
+  DOWNLOAD_FILE = MCP::Tool.define(
+    name: 'download_file',
+    description: <<~TEXT,
+      Save a file from the web into the user's Obsidian vault — an image, a PDF, any file — from an https URL on the user's list of download hosts (the server instructions name them). The server downloads it; you get the result, not the file.
+      Path: inside a folder you may write to (see list_access), with the file's name, like `Attachments/Diagram.png`. Without an extension it gets the URL's, else one from the file's type. Without `base`: creates the file only (`exists` if something is there, nothing written). With `base` (its etag): replaces it, only if it is still that version (`stale` otherwise).
+      Result: JSON `{"status", "path", "etag", "size", "content_type"}`. status: written, unchanged (that exact file was there), exists, stale. Errors say why: a host not on the list (tell the user: they can add it in the admin panel), too big, the site's answer.
+    TEXT
+    input_schema: {
+      properties: {
+        url: { type: 'string', description: 'The file\'s https URL' },
+        path: { type: 'string', description: 'Vault path, e.g. `Attachments/Diagram.png`' },
+        base: ETAG.merge(description: 'The etag of the version you are replacing, from read_file / list_folder'),
+        vault: VAULT
+      },
+      required: %w[url path],
+      additionalProperties: false
+    },
+    annotations: { read_only_hint: false, destructive_hint: true, idempotent_hint: false, open_world_hint: true }
+  ) do |url:, path:, server_context:, base: nil, vault: nil|
+    McpTools.call(server_context) do |token|
+      hosts = DownloadHosts.hosts # listed only with hosts, but the list may have emptied meanwhile
+      raise Refused, 'Downloads are off: the user lists no download hosts.' if hosts.empty?
+
+      vault = McpTools.vault(token, vault)
+      rel = McpTools.download_path(token, vault, path, url)
+      file = McpTools.download_slot do
+        McpTools.downloader.fetch(url, allowed: ->(host) { DownloadHosts.allowed?(host, hosts) }, max: Config.mcp_max_write)
+      rescue Downloader::Refused => e
+        raise Refused, e.message
+      end
+      if File.extname(rel).empty?
+        ext = McpTools.type_extension(file.content_type) or
+          raise Refused, "`#{rel}` needs an extension: neither the URL nor the file's type " \
+                         "(#{file.content_type.empty? ? 'none' : file.content_type}) gives one. Nothing written."
+        rel = McpTools.writable(token, vault, McpTools.relative(vault, "#{rel}#{ext}"))
+      end
+
+      status, etag = WriteFile.call(vault, rel, file.body, if_match: base, if_none_match: base ? nil : '*',
+                                                         author: McpTools.author(token), action: 'DOWNLOAD', keeps: true,
+                                                         trailers: { 'Source' => McpTools.source(url) })
+      info = { size: file.body.bytesize, content_type: file.content_type }
+      case status
+      when :written, :unchanged then { status:, path: rel, etag:, **info }
+      when :stale
+        next { status: :exists, path: rel } unless base
+
+        readable = etag && Access.allowed?(token.grants, vault.name, rel, :r)
+        { status: :stale, path: rel, **(readable ? { etag: } : {}) }
+      end
     end
   end
 

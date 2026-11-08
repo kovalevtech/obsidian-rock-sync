@@ -230,6 +230,42 @@ class AdminTest < VaultTest
     assert_equal '/admin/', login['Location']
   end
 
+  # Download hosts: typed as a host, a `*.` one, or a URL (its host); anything else refused, the list unchanged
+  def test_download_hosts
+    login
+    get '/admin/scoped'
+    assert_includes last_response.body, 'Download hosts'
+    post_form '/admin/hosts', 'host' => ' https://Files.Example.com./pics/a.png '
+    assert_equal '/admin/scoped', last_response['Location']
+    post_form '/admin/hosts', 'host' => '*.cdn.example.com'
+    post_form '/admin/hosts', 'host' => 'files.example.com'
+    assert_equal %w[*.cdn.example.com files.example.com], DownloadHosts.hosts, 'twice: once'
+    get '/admin/scoped'
+    assert_includes last_response.body, '<code>files.example.com</code>'
+
+    ['localhost', '1.2.3.4', 'exa mple.com', '*.com', 'example.com:443', '-x.example.com', 'пример.рф', 'a..b', ''].each do |typed|
+      post_form '/admin/hosts', 'host' => typed
+      assert_equal 422, last_response.status, typed
+      assert_includes last_response.body, "isn&#39;t a host name", typed unless typed.empty?
+      assert_includes last_response.body, %(name="host" placeholder=" " required value="#{Rack::Utils.escape_html(typed)}"), typed
+    end
+    assert_equal %w[*.cdn.example.com files.example.com], DownloadHosts.hosts
+
+    post_form "/admin/hosts/#{DB[:download_hosts].where(host: 'files.example.com').get(:id)}/remove"
+    assert_equal '/admin/scoped', last_response['Location']
+    assert_equal %w[*.cdn.example.com], DownloadHosts.hosts
+  end
+
+  def test_download_hosts_matching
+    assert DownloadHosts.allowed?('files.example.com', %w[files.example.com])
+    assert DownloadHosts.allowed?('a.b.example.com', %w[*.example.com])
+    refute DownloadHosts.allowed?('example.com', %w[*.example.com])
+    refute DownloadHosts.allowed?('evilexample.com', %w[*.example.com example.com])
+    refute DownloadHosts.allowed?('files.example.com.evil.org', %w[files.example.com])
+    refute DownloadHosts.allowed?('x.files.example.com', %w[files.example.com])
+    assert DownloadHosts.allowed?('FILES.example.com.', %w[files.example.com])
+  end
+
   def test_post_without_csrf_token
     login
     post '/admin/vaults', 'name' => 'notes'
