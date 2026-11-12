@@ -62,8 +62,13 @@ class RockSyncSettingTab extends PluginSettingTab {
     containerEl.empty();
     this.stopCheck();
 
-    // Status on top, live while the tab is open
+    // Status on top, live while the tab is open. Re-rendered every second while counting down to the next try: its
+    // parts are made once (a button replaced under the pointer loses the click), only their content changes
     this.statusEl = containerEl.createDiv({ cls: 'rock-sync-status-card' });
+    this.statusIconEl = this.statusEl.createDiv();
+    this.statusBodyEl = this.statusEl.createDiv({ cls: 'rock-sync-status-card-body' });
+    this.syncButton = this.statusEl.createEl('button', { text: 'Sync now' });
+    this.syncButton.addEventListener('click', () => this.plugin.syncNow());
     this.unsubscribe?.();
     this.unsubscribe = this.plugin.status.onChange(() => this.renderStatus());
     this.renderStatus();
@@ -339,16 +344,16 @@ class RockSyncSettingTab extends PluginSettingTab {
   }
 
   renderStatus() {
-    const el = this.statusEl;
+    const { statusEl: el, statusIconEl: iconEl, statusBodyEl: body } = this;
     if (!el) return;
     const { status, queue, pausedFor } = this.plugin;
     const { state } = status;
     const { icon, label } = status.constructor.describe(state);
-    el.empty();
     el.className = `rock-sync-status-card rock-sync-status-card-${state}`;
 
-    setIconOf(el.createDiv({ cls: `rock-sync-status-card-icon rock-sync-status rock-sync-status-${state}` }), icon);
-    const body = el.createDiv({ cls: 'rock-sync-status-card-body' });
+    iconEl.className = `rock-sync-status-card-icon rock-sync-status rock-sync-status-${state}`;
+    setIconOf(iconEl, icon);
+    body.empty();
     body.createDiv({ cls: 'rock-sync-status-card-title', text: label });
     const meta = [
       settings.vault ? `${settings.vault} on ${hostOf(settings.endpoint)}` : 'Not connected',
@@ -357,7 +362,7 @@ class RockSyncSettingTab extends PluginSettingTab {
     if (queue.size()) meta.push(`${queue.size()} waiting`);
     body.createDiv({ cls: 'rock-sync-status-card-meta', text: meta.join(' · ') });
 
-    const error = state === 'error' ? status.errorText : state === 'offline' ? "The server doesn't answer" : null;
+    const error = status.problemText;
     if (error) body.createDiv({ cls: 'rock-sync-status-card-problem', text: error });
     else if (status.lastError) {
       body.createDiv({
@@ -366,10 +371,8 @@ class RockSyncSettingTab extends PluginSettingTab {
       });
     }
 
-    // Not connected, or the token refused: nothing to retry, a code below fixes it
-    if (['error', 'offline'].includes(state) && pausedFor !== 'credentials') {
-      el.createEl('button', { text: 'Retry' }).addEventListener('click', () => this.plugin.retrySync());
-    }
+    // Not connected: nothing to sync with, a code below fixes it
+    this.syncButton.toggle(pausedFor !== 'credentials');
   }
 }
 

@@ -84,10 +84,24 @@ function readManifest(json) {
 const ATTEMPTS = 5;
 const RETRY_DELAY = 5000; // ms, doubles after each failed attempt
 
+// Pauses between attempts waiting now: ended early by an abort or by retryNow()
+const pauses = new Set();
+
 const sleep = (ms, signal) => new Promise((resolve) => {
-  const timer = window.setTimeout(resolve, ms);
-  signal?.addEventListener('abort', () => { window.clearTimeout(timer); resolve(); }, { once: true });
+  const end = () => {
+    window.clearTimeout(timer);
+    pauses.delete(end);
+    resolve();
+  };
+  const timer = window.setTimeout(end, ms);
+  pauses.add(end);
+  signal?.addEventListener('abort', end, { once: true });
 });
+
+// Sync now: every request waiting to try again tries now
+const retryNow = () => {
+  for (const end of [...pauses]) end();
+};
 
 class Unauthorized extends Error {}
 // No answer after all attempts (offline, server down, 5xx): the poller shows that as offline, not as an error
@@ -142,5 +156,5 @@ const savedAtOf = (res) => (res.headers['last-modified'] ? new Date(res.headers[
 
 export {
   session, activeCredentials, sameCredentials, clientInfo, authHeaders, lowerHeaders, fileUrl, contentTypeOf, DEVICE_LIMIT,
-  manifestUrl, pairUrl, tokenUrl, readManifest, request, savedAtOf, Unauthorized, NoAnswer,
+  manifestUrl, pairUrl, tokenUrl, readManifest, request, retryNow, savedAtOf, Unauthorized, NoAnswer,
 };

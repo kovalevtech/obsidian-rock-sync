@@ -3,6 +3,8 @@
 // A manifest that differs from what this device has (manifestChanged) queues a full manifest check; so does the first
 // answer after failures (back online: edits made meanwhile go up, failed pushes are retried).
 // A 401 pauses sync (stops the poller too) unless the credentials were replaced while the poll was waiting.
+// A poll this device left behind (a window closed or reloaded: the desktop app finishes its requests anyway) holds
+// nothing up: the server ends a token's older poll when its next one comes.
 // The first subsystem as a class the plugin owns (see CLAUDE.md "Architecture direction"): this.poller.
 import { requestUrl } from 'obsidian';
 import { session, activeCredentials, sameCredentials, authHeaders, lowerHeaders, manifestUrl, readManifest } from './api.js';
@@ -19,6 +21,7 @@ export default class Poller {
     this.running = false;
     this.loops = 0; // a loop whose poll is still in flight after stop() + start() ends instead of running alongside
     this.failures = 0; // polls failed in a row: > 0 = offline (sync status)
+    this.problem = null; // while failures > 0: { text: why the last poll failed, retryAt: Date of the next one | null (now) }
     this.wakeUp = null; // ends the back-off wait after a failure
   }
 
@@ -36,12 +39,13 @@ export default class Poller {
   }
 
   setFailures(n) {
+    if (!n) this.problem = null;
     if (n === this.failures) return;
     this.failures = n;
     this.plugin.status.update();
   }
 
-  // Don't sit out a back-off (the app is back in the foreground): poll right away
+  // Don't sit out a back-off (the app is back in the foreground, Sync now): poll right away
   wake() {
     this.wakeUp?.();
   }
@@ -53,6 +57,7 @@ export default class Poller {
       const creds = activeCredentials();
       const started = Date.now();
       let res = null;
+      let error = null;
       try {
         res = lowerHeaders(await requestUrl({
           url: manifestUrl(creds.endpoint, `&wait=${WAIT}`),
@@ -60,7 +65,8 @@ export default class Poller {
           throw: false,
         }));
       } catch (e) {
-        debug('poll failed', String(e)); // network
+        error = e; // network
+        debug('poll failed', String(e));
       }
       if (!live()) return;
       if (res?.status === 401) {
@@ -93,14 +99,29 @@ export default class Poller {
         continue;
       }
 
-      this.setFailures(this.failures + 1);
-      const delay = Math.min(RETRY_DELAY * 2 ** (this.failures - 1), MAX_RETRY_DELAY);
-      debug('poll: retrying in', delay, res ? `status ${res.status}` : 'no response');
+      const failures = this.failures + 1;
+      const delay = Math.min(RETRY_DELAY * 2 ** (failures - 1), MAX_RETRY_DELAY);
+      this.problem = { text: problemOf(res, error), retryAt: new Date(Date.now() + delay) };
+      debug('poll: retrying in', delay, this.problem.text);
+      this.setFailures(failures);
       await new Promise((resolve) => {
         const timer = window.setTimeout(resolve, delay);
         this.wakeUp = () => { window.clearTimeout(timer); resolve(); };
       });
       this.wakeUp = null;
+      if (live() && this.problem) {
+        this.problem.retryAt = null;
+        this.plugin.status.update();
+      }
     }
   }
+}
+
+// Why a poll failed, for the sync status: the server may well have answered
+function problemOf(res, error) {
+  if (!res) return `No connection to the server: ${error?.message ?? error ?? 'no answer'}`;
+  if (res.status === 429) return 'The server refused the poll: too many waiting (429)';
+  if (res.status === 304) return 'The server answered at once instead of holding the poll: a proxy in front?';
+  if (res.status === 200) return 'The server answered without an ETag';
+  return `The server answered ${res.status}`;
 }

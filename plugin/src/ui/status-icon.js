@@ -89,8 +89,7 @@ export default class StatusIcon {
     const { status } = this.plugin;
     const { state } = status;
     const { icon, label } = SyncStatus.describe(state);
-    const detail = state === 'error' ? status.errorText
-      : status.lastOk ? `last contact ${formatShort(status.lastOk)}` : null;
+    const detail = status.problemText ?? (status.lastOk ? `last contact ${formatShort(status.lastOk)}` : null);
     const tooltip = `Rock Sync: ${label}${detail ? ` · ${detail}` : ''}`;
     const key = `${state}|${tooltip}`;
     if (this.shown.get(el) === key) return;

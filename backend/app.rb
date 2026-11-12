@@ -29,7 +29,7 @@ class App < Sinatra::Base
   PAIR_MAX_BODY = 1024 # bytes read of POST /pair's body: no credentials, so not whatever anyone sends
   # GET /manifest's ETag before a vault's first commit (no HEAD yet): polls wait past it like past a version
   NO_COMMITS = 'no-commits'
-  # A long poll over PollSlots' caps: 429 + Retry-After (s; the plugin backs off 5 s on any failure anyway)
+  # A long poll over PollSlots' cap for the process: 429 + Retry-After (s; the plugin backs off 5 s on any failure anyway)
   POLLS_REFUSED = JSON.generate(error: 'too many polls')
   POLL_RETRY_AFTER = '5'
 
@@ -217,14 +217,15 @@ class App < Sinatra::Base
 
   # Long poll with ?wait=N (s, up to ChangeFeed::MAX_WAIT): answers once the vault's HEAD moves past the client's version
   # (If-None-Match, echoed as received) — or after N seconds, then usually 304. Without If-None-Match: right away.
-  # Over PollSlots' caps (per token, per process): 429 at once, no wait. After a wait the credentials are checked
-  # again: a token revoked (or Reconnected) meanwhile gets the 401, not one more manifest.
+  # One waiting per token (PollSlots): a new one ends the token's older poll, which answers as after its wait. Over the
+  # process' cap: 429 at once, no wait. After a wait the credentials are checked again: a token revoked (or
+  # Reconnected) meanwhile gets the 401, not one more manifest.
   # Format by ?v=: 1 → files { path => [hash, size] }; none (v0, clients from before sizes) → { path => hash }
   get '/manifest' do
     known = request.env['HTTP_IF_NONE_MATCH'].to_s.delete_prefix('W/').delete('"')
     if params['wait'] && !known.empty?
-      waited = PollSlots.hold(@device.id) do
-        @vault.feed.wait(known, params['wait'].to_i) { @vault.version || NO_COMMITS }
+      waited = PollSlots.hold(@device.id, @vault.feed) do |poll|
+        @vault.feed.wait(known, params['wait'].to_i, poll) { @vault.version || NO_COMMITS }
       end
       unless waited
         env['vault_sync.auth'] += ' (too many polls)'

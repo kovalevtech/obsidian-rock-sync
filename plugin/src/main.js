@@ -3,7 +3,7 @@ import { Notice, Plugin } from 'obsidian';
 import { DEFAULT_SETTINGS, SETTINGS_KEY, settings, RockSyncSettingTab } from './settings.js';
 import { debug } from './log.js';
 import { syncable } from './paths.js';
-import { session, clientInfo } from './api.js';
+import { session, clientInfo, retryNow } from './api.js';
 import Credentials from './credentials.js';
 import FirstSync from './first-sync.js';
 import SyncStatus from './status.js';
@@ -82,12 +82,15 @@ class RockSync extends Plugin {
     this.status.update();
   }
 
-  // Settings' Retry (error / offline): the saved credentials again if a 401 paused sync; else a manifest check
-  // (pushes what failed), failed pushes again, a poll right away
-  retrySync() {
+  // Sync now (settings, command), whatever back-off is running: the saved credentials again if a 401 paused sync; else
+  // failed pushes again and a manifest check, every pause between attempts ended (each request's, the poller's).
+  // A request in flight can't be cut short (requestUrl). Not connected: the settings, to connect
+  syncNow() {
+    if (this.pausedFor === 'credentials') return this.openSettings();
     if (this.pausedFor === 'unauthorized') return this.resumeSync();
     for (const path of this.failed) this.queue.enqueue('push', path);
     this.queue.enqueue('manifest');
+    retryNow();
     this.poller.wake();
   }
 
@@ -252,8 +255,7 @@ class RockSync extends Plugin {
       for (const path of Object.keys(this.conflicts)) if (this.conflictViewsOf(path).length) this.queue.enqueue('refresh', path);
     }, REMOTE_POLL_INTERVAL));
 
-    // Manual trigger for testing; later: startup, foreground, timer
-    this.addCommand({ id: 'check-manifest', name: 'Check manifest', callback: () => this.queue.enqueue('manifest') });
+    this.addCommand({ id: 'sync-now', name: 'Sync now', callback: () => this.syncNow() });
     // Stored server versions may be stale: merge again where needed
     this.app.workspace.onLayoutReady(async () => {
       // After layout ready: during startup Obsidian reports every existing file and folder as created
