@@ -52,7 +52,9 @@ class AdminTest < VaultTest
 
   # Every route Admin knows (HEAD included) with a concrete path, plus one it doesn't; the login page left out
   def routes
-    Admin.routes.flat_map { |verb, list| list.map { |pattern, *| [verb, "/admin#{pattern.to_s.sub(':id', '1')}"] } }
+    Admin.routes.flat_map do |verb, list|
+      list.map { |pattern, *| [verb, "/admin#{pattern.to_s.sub(':id', '1').sub(':name', 'test').sub(':sha', 'a' * 40)}"] }
+    end
       .reject { |_, path| path == '/admin/login' }
       .push(%w[GET /admin], %w[GET /admin/nope], %w[POST /admin/nope])
   end
@@ -386,6 +388,204 @@ class AdminTest < VaultTest
     assert_includes last_response.body, '<div class="muted nowrap">1 pack</div>'
     assert_match(/history \d+(\.\d)? [KM]?B → \d+(\.\d)? [KM]?B/, last_response.body)
     assert_equal 404, post_form('/admin/vaults/missing/compact').status
+  end
+
+  # History (History; the index and its grouping: history_test.rb)
+
+  def history_commit(path, content, name: 'phone', kind: 'device', at: nil, remove: [])
+    ENV['GIT_COMMITTER_DATE'] = ENV['GIT_AUTHOR_DATE'] = "@#{at.to_i} +0000" if at
+    @vault.commit("PUT #{path}", write: path ? { path => content } : {}, remove:,
+                                 author: Vault::Author.new(name:, kind:))
+    blob(content.to_s)
+  ensure
+    ENV.delete('GIT_COMMITTER_DATE')
+    ENV.delete('GIT_AUTHOR_DATE')
+  end
+
+  def history_entry(path) = (History.index!(@vault); DB[:history_entries].where(path:).reverse(:last_at, :id).first)
+
+  def test_history_page
+    history_commit('Notes/a.md', "one\n")
+    history_commit('.plugins/p/data.json', 'plugin-settings')
+    login
+    get '/admin/vaults'
+    assert_includes last_response.body, 'href="/admin/vaults/test/history">History</a>'
+    %w[/admin/vaults/test/history /admin/vaults/test/history?tab=deleted /admin/vaults/test/history?tab=moves].each do |page|
+      get page
+      assert_equal 200, last_response.status, page
+      assert_equal Admin::CSP, last_response['Content-Security-Policy'], page
+      assert_no_inline(last_response.body, page)
+      refute_includes last_response.body, '.plugins', page
+    end
+    get '/admin/vaults/test/history'
+    assert_includes last_response.body, '>Notes/a.md</a>'
+    assert_includes last_response.body, '<option value="phone">'
+    get "/admin/vaults/test/history/#{history_entry('Notes/a.md')[:id]}"
+    assert_equal 200, last_response.status
+    assert_no_inline(last_response.body, 'an entry')
+    assert_equal 404, (get '/admin/vaults/missing/history').status
+    assert_equal 404, (get '/admin/vaults/test/history/999999').status
+  end
+
+  def test_history_filters_and_presets
+    history_commit('old.md', 'x', name: 'laptop', at: @now - 10 * 86_400)
+    history_commit('recent.md', 'x', name: 'phone', at: @now - 2 * 86_400)
+    history_commit('today.md', 'x', name: 'phone', at: @now - 3600)
+    login
+    listed = lambda do |query|
+      get "/admin/vaults/test/history?#{query}"
+      last_response.body.scan(%r{>(\w+\.md)</a>}).flatten
+    end
+    assert_equal %w[today.md recent.md old.md], listed.('')
+    assert_equal %w[today.md recent.md], listed.('range=7d')
+    assert_equal %w[today.md], listed.('range=24h')
+    assert_equal %w[recent.md], listed.('range=7d&author=PHO&path=rec')
+    assert_equal %w[old.md], listed.("to=#{(@now - 5 * 86_400).utc.strftime('%F')}")
+    assert_equal %w[recent.md], listed.("from=#{(@now - 3 * 86_400).utc.strftime('%F')}&to=#{(@now - 2 * 86_400).utc.strftime('%F')}")
+    # The preset links keep the other filters, drop the dates; tabs keep the filters
+    get '/admin/vaults/test/history?author=phone&from=2020-01-01'
+    assert_includes last_response.body, 'href="/admin/vaults/test/history?author=phone&amp;range=7d"'
+    assert_includes last_response.body, 'href="/admin/vaults/test/history?tab=deleted&amp;author=phone&amp;from=2020-01-01"'
+  end
+
+  def test_history_pages_with_filters
+    History.index!(@vault)
+    # 60 entries of phone's, one of laptop's between: two pages for phone
+    60.times { history_commit("n#{_1}.md", 'x', at: @now - 3600 + _1) }
+    history_commit('laptop.md', 'x', name: 'laptop', at: @now - 1800)
+    login
+    get '/admin/vaults/test/history?author=phone'
+    first = last_response.body.scan(%r{>(n\d+\.md)</a>}).flatten
+    assert_equal History::PAGE, first.size
+    older = last_response.body[%r{href="(/admin/vaults/test/history\?author=phone&amp;before=\d+-\d+)">Older}, 1]
+    get older.gsub('&amp;', '&')
+    second = last_response.body.scan(%r{>(n\d+\.md)</a>}).flatten
+    assert_equal 60, (first + second).uniq.size
+    refute_includes last_response.body, 'laptop.md'
+    refute_includes last_response.body, '>Older<'
+  end
+
+  def test_history_diffs_and_versions
+    history_commit('a.md', "one\ntwo\n")
+    history_commit('a.md', "one\ntwo\nthree\n")
+    history_commit('a.md', "one\n2\nthree\n")
+    entry = history_entry('a.md')
+    login
+    get "/admin/vaults/test/history/#{entry[:id]}"
+    # Created: the last version as text, then the versions, each a diff
+    assert_includes last_response.body, %(<pre class="text">one\n2\nthree\n</pre>)
+    versions = last_response.body.scan(%r{history/#{entry[:id]}\?v=(\d+)}).flatten
+    assert_equal 3, versions.size
+    get "/admin/vaults/test/history/#{entry[:id]}?v=#{versions.first}" # the newest
+    assert_includes last_response.body, '<span class="del">-two</span><span class="add">+2</span>'
+    assert_equal 404, (get "/admin/vaults/test/history/#{entry[:id]}?v=999999").status
+
+    # An edit run: the diff from the version before it to its last one
+    history_commit('b.md', "x\n", at: Time.now - 3600)
+    history_commit('b.md', "x\ny\n", at: Time.now)
+    history_commit('b.md', "x\ny\nz\n", at: Time.now + 2)
+    get "/admin/vaults/test/history/#{history_entry('b.md')[:id]}"
+    assert_includes last_response.body, 'Edited'
+    assert_includes last_response.body, '<span class="add">+y</span><span class="add">+z</span>'
+  end
+
+  def test_history_deleted_file_and_binaries
+    png = "\x89PNG\r\n\x1A\n#{'p' * 100}".b
+    history_commit('img.png', png)
+    history_commit('doc.pdf', '%PDF-1.4 x')
+    history_commit('draw.svg', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+    history_commit('data.bin', "\0\1\2".b)
+    history_commit('big.md', 'a' * (History::Content::TEXT_MAX + 1))
+    history_commit('gone.md', "last words\n")
+    history_commit(nil, nil, remove: ['gone.md'], name: 'laptop')
+    login
+
+    get "/admin/vaults/test/history?tab=deleted"
+    assert_includes last_response.body, '>gone.md</a>'
+    get "/admin/vaults/test/history/#{history_entry('gone.md')[:id]}"
+    assert_includes last_response.body, 'Deleted'
+    assert_includes last_response.body, 'laptop'
+    assert_includes last_response.body, %(<pre class="text">last words\n</pre>)
+
+    get "/admin/vaults/test/history/#{history_entry('img.png')[:id]}"
+    assert_includes last_response.body, %(<img class="version" src="/admin/vaults/test/blobs/#{blob(png)}")
+    get "/admin/vaults/test/blobs/#{blob(png)}"
+    assert_equal png, last_response.body.b
+    assert_equal 'image/png', last_response.content_type
+    assert_equal %(inline; filename="img.png"; filename*=UTF-8''img.png), last_response['Content-Disposition']
+    assert_equal "default-src 'none'; sandbox", last_response['Content-Security-Policy']
+    assert_equal 'nosniff', last_response['X-Content-Type-Options']
+    get "/admin/vaults/test/blobs/#{blob(png)}?download=1"
+    assert_match(/\Aattachment;/, last_response['Content-Disposition'])
+
+    # SVG: through <img> on the page; opened directly, sandboxed
+    get "/admin/vaults/test/history/#{history_entry('draw.svg')[:id]}"
+    assert_includes last_response.body, '<img class="version"'
+    refute_includes last_response.body, '<script>alert'
+    get "/admin/vaults/test/blobs/#{blob('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')}"
+    assert_equal 'image/svg+xml', last_response.content_type
+    assert_equal "default-src 'none'; sandbox", last_response['Content-Security-Policy']
+
+    # PDF and other binaries: downloads only
+    get "/admin/vaults/test/history/#{history_entry('doc.pdf')[:id]}"
+    assert_includes last_response.body, 'PDF · 10 B'
+    get "/admin/vaults/test/blobs/#{blob('%PDF-1.4 x')}"
+    assert_equal 'application/pdf', last_response.content_type
+    assert_match(/\Aattachment; filename="doc.pdf"/, last_response['Content-Disposition'])
+    get "/admin/vaults/test/history/#{history_entry('data.bin')[:id]}"
+    assert_includes last_response.body, 'Binary · 3 B'
+    get "/admin/vaults/test/blobs/#{blob("\0\1\2".b)}"
+    assert_equal 'application/octet-stream', last_response.content_type
+    assert_match(/\Aattachment;/, last_response['Content-Disposition'])
+
+    get "/admin/vaults/test/history/#{history_entry('big.md')[:id]}"
+    assert_includes last_response.body, 'Too large to show here (1 MB)'
+    refute_includes last_response.body, 'a' * 1000
+    assert_includes last_response.body, "/admin/vaults/test/blobs/#{blob('a' * (History::Content::TEXT_MAX + 1))}?download=1"
+  end
+
+  def test_history_blobs_only_from_the_index
+    secret = history_commit('.plugins/p/data.json', 'plugin-settings')
+    mine = history_commit('a.md', 'mine')
+    other = Vault.create('other')
+    other.commit('PUT b.md', write: { 'b.md' => 'theirs' })
+    History.index!(other)
+    History.index!(@vault)
+    login
+    get "/admin/vaults/test/blobs/#{mine}"
+    assert_equal 200, last_response.status
+    [blob('theirs'), secret, @vault.version, git('rev-parse', 'HEAD^{tree}').chomp, mine.upcase, "#{mine[0, 39]}",
+     '../../repo.git/HEAD'].each do |sha|
+      get "/admin/vaults/test/blobs/#{sha}"
+      assert_equal 404, last_response.status, sha
+    end
+    get "/admin/vaults/other/blobs/#{blob('theirs')}"
+    assert_equal 200, last_response.status
+  end
+
+  # Git drops < and > from author names: the name tries to break out of an attribute instead
+  def test_history_escapes
+    payload = '<img src=x onerror=alert(1)>'
+    name = 'x" autofocus onfocus="alert(1)'
+    history_commit("#{payload}.md", "#{payload}\n", name:)
+    history_commit("#{payload}.md", "#{payload}\n#{payload}\n", name:)
+    entry = history_entry("#{payload}.md")
+    login
+    escaped = '&lt;img src=x onerror=alert(1)&gt;'
+    ["/admin/vaults/test/history", "/admin/vaults/test/history?author=#{Rack::Utils.escape(name)}",
+     "/admin/vaults/test/history/#{entry[:id]}", "/admin/vaults/test/history/#{entry[:id]}?v=#{entry[:id] + 1}"].each do |page|
+      get page
+      assert_equal 200, last_response.status, page
+      refute_includes last_response.body, payload, page
+      refute_includes last_response.body, name, page
+      assert_includes last_response.body, escaped, page
+      assert_includes last_response.body, 'x&quot; autofocus onfocus=&quot;alert(1)', page
+    end
+    get "/admin/vaults/test/history?author=#{Rack::Utils.escape(name)}"
+    assert_includes last_response.body, %(<option value="x&quot; autofocus onfocus=&quot;alert(1)">)
+    get "/admin/vaults/test/blobs/#{blob("#{payload}\n")}"
+    assert_equal %(attachment; filename="#{payload.tr('"', '_')}.md"; filename*=UTF-8''#{ERB::Util.url_encode("#{payload}.md")}),
+                 last_response['Content-Disposition']
   end
 
   # Scoped tokens (MCP)

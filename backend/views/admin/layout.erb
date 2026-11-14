@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>vault-sync admin</title>
+<% if @refresh %><meta http-equiv="refresh" content="<%= @refresh.to_i %>"><% end %>
 <link rel="stylesheet" href="<%= asset('admin.css') %>">
 <script src="<%= asset('admin.js') %>" defer></script>
 </head>
@@ -17,7 +18,7 @@
   </header>
   <div class="layout">
     <nav class="sidebar">
-      <a href="<%= path('/vaults') %>" class="<%= 'active' if page?('/vaults') %>"><%= icon(:folder) %>Vaults</a>
+      <a href="<%= path('/vaults') %>" class="<%= 'active' if request.path_info.start_with?('/vaults') %>"><%= icon(:folder) %>Vaults</a>
       <a href="<%= path('/tokens') %>" class="<%= 'active' if request.path_info.start_with?('/tokens') || page?('/connect') %>"><%= icon(:key) %>Device tokens</a>
       <a href="<%= path('/scoped') %>" class="<%= 'active' if request.path_info.start_with?('/scoped') %>"><%= icon(:extension) %>Scoped tokens</a>
       <a href="<%= path('/hosts') %>" class="<%= 'active' if page?('/hosts') %>"><%= icon(:download) %>Download hosts</a>

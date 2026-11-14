@@ -1,0 +1,72 @@
+<% @title = "History · #{@vault.name}" %>
+<% query = @filters[:query] %>
+<section class="paper">
+  <div class="paper-head">
+    <h2>History of <%= h @vault.name %></h2>
+    <a class="btn" href="<%= path('/vaults') %>">Vaults</a>
+  </div>
+  <nav class="tabs">
+    <% [[nil, 'All'], ['deleted', 'Deleted'], ['moves', 'Moves']].each do |tab, label| %>
+      <a href="<%= h history_path(tab:, before: nil) %>" class="<%= 'active' if query[:tab] == tab %>"><%= label %></a>
+    <% end %>
+  </nav>
+  <form class="paper-body filters" method="get" action="<%= path("/vaults/#{@vault.name}/history") %>">
+    <% if query[:tab] %><input type="hidden" name="tab" value="<%= h query[:tab] %>"><% end %>
+    <% if query[:range] %><input type="hidden" name="range" value="<%= h query[:range] %>"><% end %>
+    <label class="field"><input name="author" placeholder=" " list="history-authors" value="<%= h query[:author] %>"><span>Author</span></label>
+    <datalist id="history-authors"><% @authors.to_a.each do |name| %><option value="<%= h name %>"><% end %></datalist>
+    <label class="field"><input name="path" placeholder=" " value="<%= h query[:path] %>"><span>File or folder</span></label>
+    <label class="field date"><input type="date" name="from" placeholder=" " value="<%= h query[:from] %>"><span>From (UTC)</span></label>
+    <label class="field date"><input type="date" name="to" placeholder=" " value="<%= h query[:to] %>"><span>To (UTC)</span></label>
+    <button class="btn contained">Filter</button>
+    <a class="btn" href="<%= h history_path(author: nil, path: nil, from: nil, to: nil, range: nil, before: nil) %>">Clear</a>
+  </form>
+  <div class="paper-body presets">
+    <% [*Admin::HISTORY_RANGES.map { |key, (label, _)| [key, label] }, [nil, 'All time']].each do |key, label| %>
+      <a class="chip<%= ' active' if query[:range] == key %>" href="<%= h history_path(range: key, from: nil, to: nil, before: nil) %>"><%= label %></a>
+    <% end %>
+  </div>
+
+  <% if @indexing %>
+    <% @refresh = 3 %>
+    <div class="paper-body muted">Indexing the history of this vault… The page reloads itself.</div>
+  <% elsif @entries.empty? %>
+    <div class="paper-body muted">Nothing here<%= ' for these filters' if query.except(:tab).values.any? { !_1.to_s.empty? } %>.</div>
+  <% else %>
+    <div class="scroll">
+      <table class="history">
+        <thead><tr><th>When</th><th>Author</th><th>Action</th><th>File</th><th class="num">Versions</th></tr></thead>
+        <tbody>
+          <% @entries.each do |entry| %>
+            <tr>
+              <td class="muted"><%= h time_range(entry[:first_at], entry[:last_at]) %></td>
+              <td class="nowrap"><%= h entry[:author_name] %> <span class="chip small"><%= h entry[:author_kind] %></span></td>
+              <td class="nowrap"><%= h Admin::HISTORY_ACTIONS[entry[:kind]] %></td>
+              <td class="path">
+                <% if entry[:kind].start_with?('folder_') %>
+                  <a href="<%= h entry_path(entry) %>"><%= h entry[:old_path] ? "#{entry[:old_path]}/ → #{entry[:path]}/" : "#{entry[:path]}/" %></a>
+                  <details>
+                    <summary><%= entry[:files] %> <%= entry[:files] == 1 ? 'file' : 'files' %></summary>
+                    <ul class="files">
+                      <% History.events(entry).each do |event| %>
+                        <% next if event[:path].end_with?('/.keep') %>
+                        <li><a href="<%= h entry_path(entry, event) %>"><%= h event[:old_path] ? "#{event[:old_path]} → #{event[:path]}" : event[:path] %></a></li>
+                      <% end %>
+                    </ul>
+                  </details>
+                <% else %>
+                  <a href="<%= h entry_path(entry) %>"><%= h entry[:old_path] ? "#{entry[:old_path]} → #{entry[:path]}" : entry[:path] %></a>
+                <% end %>
+              </td>
+              <td class="num muted"><%= entry[:kind].start_with?('folder_') ? '' : entry[:versions] %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    <% if @more %>
+      <% last = @entries.last %>
+      <div class="paper-body row spaced"><a class="btn" href="<%= h history_path(before: "#{last[:last_at]}-#{last[:id]}") %>">Older</a></div>
+    <% end %>
+  <% end %>
+</section>

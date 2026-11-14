@@ -128,6 +128,66 @@ class Git
     found
   end
 
+  # Commits after `since` (nil = from the root) up to `to`, oldest first, along first parents (an adopted repo's merges
+  # as their change against the first parent), each with every path it changed — from git's own diff (--raw, renames
+  # detected with -M), not from its message. Yields { sha:, time:, name:, email:, client:, changes: [{ action:
+  # added / modified / deleted / renamed, path:, old_path:, before:, after: }] }; only regular files (no symlinks,
+  # submodules)
+  def each_commit(to, since: nil)
+    format = '%x1e%H%x1f%ct%x1f%an%x1f%ae%x1f%(trailers:key=Client,valueonly,separator=%x2C)'
+    range = since ? "#{since}..#{to}" : to
+    log = [*command, 'log', '--reverse', '--first-parent', '--diff-merges=first-parent', '--root', '-M', '--raw',
+           '--no-abbrev', '-z', "--format=#{format}", range, '--']
+    IO.popen(ENV_ISOLATED, log, 'rb', chdir: git_dir, err: File::NULL) do |io|
+      # A commit = RS, its fields split by US, NUL, then "\n" and its entries: ":<modes> <shas> <status>" NUL path NUL
+      # (two paths for a rename)
+      io.each_line("\x1e") do |record|
+        header, rest = record.chomp("\x1e").force_encoding(Encoding::UTF_8).split("\0", 2)
+        next if header.to_s.empty?
+
+        sha, time, name, email, client = header.split("\x1f", -1)
+        yield({ sha:, time: time.to_i, name:, email:, client: client.to_s.empty? ? nil : client,
+                changes: raw_changes(rest.to_s.delete_prefix("\n")) })
+      end
+    end
+    raise Error, 'git log failed' unless $?.success?
+  end
+
+  # Is `a` an ancestor of `b` (or b itself)? false too when git doesn't know a (history rewritten, gc'd since)
+  def ancestor?(a, b)
+    _out, _err, status = Open3.capture3(ENV_ISOLATED, *command, 'merge-base', '--is-ancestor', a, b, chdir: git_dir)
+    status.success?
+  end
+
+  # Commits after `since` up to `to` along first parents (nil: all)
+  def count(to, since: nil) = run('rev-list', '--count', '--first-parent', since ? "#{since}..#{to}" : to).to_i
+
+  # A blob's first bytes (its type, by magic numbers), without reading the rest; nil if git doesn't have it
+  def blob_head(hash, bytes = 16)
+    return nil unless hash.to_s.match?(/\A\h{40}\z/)
+
+    head = IO.popen(ENV_ISOLATED, [*command, 'cat-file', 'blob', hash], 'rb', chdir: git_dir, err: File::NULL) do |io|
+      io.read(bytes)
+    end
+    return head if head # git may die of the closed pipe: what it sent is what counts
+
+    $?.success? ? ''.b : nil # an empty blob, or none
+  end
+
+  # { sha => size } of the blobs among shas, in one call (others left out)
+  def blob_sizes(shas)
+    return {} if shas.empty?
+
+    out = run('cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)', stdin: shas.map { "#{_1}\n" }.join)
+    out.lines.filter_map { |line| sha, type, size = line.split; [sha, size.to_i] if type == 'blob' }.to_h
+  end
+
+  # Unified diff of two blobs (hashes), its hunks only (no headers), as text whatever git would guess
+  def diff(a, b)
+    out = run('diff', '--no-color', '--no-ext-diff', '--no-textconv', '--text', '-U3', a, b, allow_failure: true)
+    out.lines.drop_while { !_1.start_with?('@@') }.join
+  end
+
   # 3-way merge of contents (not paths): [text, number of conflicts], or nil if git can't (binary files).
   # labels: [current, base, other] for the conflict markers. conflictStyle pinned: a global diff3 / zdiff3 setting
   # would add a base section (kept although the global config is out: the repo's own config could set it). Temp files
@@ -165,6 +225,35 @@ class Git
   end
 
   private
+
+  REGULAR = /\A10(0644|0755)\z/
+  STATUS = { 'A' => :added, 'M' => :modified, 'T' => :modified, 'D' => :deleted, 'R' => :renamed }.freeze
+
+  # The entries of `log --raw -z` for one commit
+  def raw_changes(raw)
+    tokens = raw.split("\0")
+    changes = []
+    while (meta = tokens.shift)
+      next unless meta.start_with?(':')
+
+      old_mode, new_mode, before, after, status = meta.delete_prefix(':').split
+      paths = [tokens.shift]
+      paths << tokens.shift if status.start_with?('R', 'C')
+      action = STATUS[status[0]] or next
+      # Only regular files count (an added path's old mode is 000000): a symlink that became a file was added
+      before = nil unless old_mode.match?(REGULAR)
+      after = nil unless new_mode.match?(REGULAR)
+      next unless before || after
+
+      path = paths.last
+      if action == :renamed && !after then action, path = :deleted, paths.first
+      elsif !before then action = :added
+      elsif !after then action = :deleted
+      end
+      changes << { action:, path:, old_path: action == :renamed ? paths.first : nil, before:, after: }
+    end
+    changes
+  end
 
   # stdin: data for the command (binary). config: `-c` options for this one. allow_failure: its output whatever the
   # exit status

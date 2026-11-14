@@ -35,6 +35,7 @@
               </td>
               <td class="actions">
                 <a class="btn small" href="<%= path("/connect?vault=#{Rack::Utils.escape(name)}") %>">Connect device</a>
+                <% if vault %><a class="btn small" href="<%= path("/vaults/#{name}/history") %>">History</a><% end %>
                 <% if vault && !vault.compacting? %>
                   <form class="inline" method="post" action="<%= path("/vaults/#{name}/compact") %>">
                     <%= csrf_field %><button class="btn small">Compact</button>

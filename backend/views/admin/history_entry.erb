@@ -1,0 +1,71 @@
+<% entry = @entry %>
+<% folder = entry[:kind].start_with?('folder_') %>
+<% name = entry[:old_path] ? "#{entry[:old_path]}#{'/' if folder} → #{entry[:path]}#{'/' if folder}" : "#{entry[:path]}#{'/' if folder}" %>
+<% @title = "History · #{@vault.name}" %>
+<section class="paper">
+  <div class="paper-head">
+    <h2 class="path"><%= h name %></h2>
+    <a class="btn" href="<%= path("/vaults/#{@vault.name}/history") %>">History</a>
+  </div>
+  <div class="paper-body">
+    <p class="meta">
+      <span><%= h Admin::HISTORY_ACTIONS[entry[:kind]] %></span>
+      <span><%= h entry[:author_name] %> <span class="chip small"><%= h entry[:author_kind] %></span></span>
+      <span class="muted"><%= h time_range(entry[:first_at], entry[:last_at]) %></span>
+      <% if folder %>
+        <span class="muted"><%= entry[:files] %> <%= entry[:files] == 1 ? 'file' : 'files' %></span>
+      <% else %>
+        <span class="muted"><%= entry[:versions] %> <%= entry[:versions] == 1 ? 'version' : 'versions' %></span>
+      <% end %>
+    </p>
+
+    <% if @event %>
+      <% event = @event %>
+      <h3 class="path"><%= h event[:old_path] ? "#{event[:old_path]} → #{event[:path]}" : event[:path] %></h3>
+      <p class="muted"><%= h Admin::HISTORY_ACTIONS[event[:action] == 'added' ? 'created' : event[:action] == 'modified' ? 'edited' : event[:action]] %> · <%= h time_s(event[:at]) %> · <a href="<%= h entry_path(entry) %>"><%= folder ? 'all files' : 'the whole run' %></a></p>
+      <%= erb :history_content, layout: false, locals: { view: History::Content.of(@vault.git, event[:blob_before], event[:blob_after], event[:path]) } %>
+    <% elsif !folder %>
+      <% before, after = case entry[:kind]
+                         when 'created' then [nil, entry[:blob_after]]
+                         when 'deleted' then [entry[:blob_before], nil]
+                         else [entry[:blob_before], entry[:blob_after]]
+                         end %>
+      <%= erb :history_content, layout: false, locals: { view: History::Content.of(@vault.git, before, after, entry[:path]) } %>
+    <% end %>
+  </div>
+
+  <% if folder %>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>File</th><th>When</th><th class="num">Size</th></tr></thead>
+        <tbody>
+          <% @events.each do |event| %>
+            <% next if event[:path].end_with?('/.keep') %>
+            <tr class="<%= 'current' if @event && event[:id] == @event[:id] %>">
+              <td class="path"><a href="<%= h entry_path(entry, event) %>"><%= h event[:old_path] ? "#{event[:old_path]} → #{event[:path]}" : event[:path] %></a></td>
+              <td class="muted"><%= h time_s(event[:at]) %></td>
+              <td class="num muted"><%= event[:size] ? bytes(event[:size]) : '—' %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% elsif @events.size > 1 %>
+    <div class="paper-head"><h2>Versions</h2></div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>When</th><th>Author</th><th class="num">Size</th><th></th></tr></thead>
+        <tbody>
+          <% @events.reverse_each do |event| %>
+            <tr class="<%= 'current' if @event && event[:id] == @event[:id] %>">
+              <td class="muted"><%= h time_s(event[:at]) %></td>
+              <td class="nowrap"><%= h event[:author_name] %></td>
+              <td class="num muted"><%= event[:size] ? bytes(event[:size]) : '—' %></td>
+              <td class="actions"><a class="btn small" href="<%= h entry_path(entry, event) %>">Changes</a></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  <% end %>
+</section>

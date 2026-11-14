@@ -109,6 +109,7 @@ SQLite, migrated automatically at startup.
 | `devices` | Tokens of both kinds: name, SHA-256 of the token, created, revoked, last seen; a device token's vault |
 | `scoped_token_grants` | Which folders a scoped token may reach, and how |
 | `pairings` | Active [connection codes](admin.md#device-tokens), each with its vault (and token, for Reconnect), until it's used, expired or cancelled |
+| `history_events`, `history_entries`, `history_state` | The admin's [history](admin.md#history) index: a cache of each vault's git history, rebuilt when missing. Safe to empty: `DELETE FROM history_state; DELETE FROM history_entries; DELETE FROM history_events;` |
 
 No tokens are stored, only their hashes. A revoked token keeps its row. Connection codes are stored as they are: [why](security.md#connection-codes).
 
