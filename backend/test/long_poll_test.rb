@@ -1,6 +1,6 @@
-# Long polls can't take every Puma thread (PollSlots): at most PER_TOKEN waiting per token and PollSlots.limit for the
-# process, over that 429 at once; a slot is given back however the poll ends; a token revoked while its poll waited
-# gets a 401, not the manifest
+# Long polls can't take every Puma thread (PollSlots): one waiting per token — a new one ends the older, which answers
+# 304 — and PollSlots.limit for the process, over that 429 at once; a slot is given back however the poll ends; a token
+# revoked while its poll waited gets a 401, not the manifest
 require_relative 'test_helper'
 require 'json'
 
@@ -51,9 +51,14 @@ class LongPollTest < VaultTest
     assert_operator took, :<, 1
   end
 
-  def test_two_polls_per_token
-    polls = waiting(@token, @token)
-    assert_refused(*poll(@token))
+  # The token's poll left behind (a window closed, a reload) answers at once; the new one waits
+  def test_a_new_poll_ends_the_older_one
+    older = waiting(@token).first
+    newer = Thread.new { poll(@token) }
+    res, took = older.value
+    assert_equal 304, res.status
+    assert_operator took, :<, 5
+    holding(1)
 
     # The others aren't: the server, another token's poll, the same token's plain requests
     assert_equal 'ok', (get '/health').body
@@ -61,7 +66,7 @@ class LongPollTest < VaultTest
     other = waiting(add_token('laptop', 'test'))
 
     commit_file('b.md', "b\n")
-    (polls + other).each do |thread|
+    [newer, *other].each do |thread|
       res, = thread.value
       assert_equal 200, res.status
       assert_includes JSON.parse(res.body)['files'], 'b.md'
@@ -71,8 +76,8 @@ class LongPollTest < VaultTest
   # 12 with the default 16 threads: the 4 left answer everything else
   def test_polls_per_process
     assert_equal Config.max_threads - 4, PollSlots.limit
-    tokens = (PollSlots.limit / PollSlots::PER_TOKEN).times.map { add_token("device-#{_1}", 'test') }
-    polls = waiting(*tokens.flat_map { [_1, _1] })
+    tokens = PollSlots.limit.times.map { add_token("device-#{_1}", 'test') }
+    polls = waiting(*tokens)
     assert_refused(*poll(@token))
     assert_equal 'ok', (get '/health').body
     assert_equal 200, (get '/manifest', { 'v' => '1' }, auth(@token)).status
@@ -80,21 +85,34 @@ class LongPollTest < VaultTest
     commit_file('b.md', "b\n")
     polls.each { assert_equal 200, _1.value.first.status }
     @etag = %("#{@vault.version}")
-    waiting(@token, @token, wait: 1).each { assert_equal 304, _1.value.first.status } # the slots are back
+    waiting(@token, wait: 1).each { assert_equal 304, _1.value.first.status } # the slots are back
   end
 
+  # At the cap a token's new poll still gets through: it takes its older poll's slot
+  def test_a_new_poll_at_the_cap_replaces_the_older_one
+    tokens = PollSlots.limit.times.map { add_token("device-#{_1}", 'test') }
+    polls = waiting(*tokens)
+    newer = Thread.new { poll(tokens.first) }
+    assert_equal 304, polls.first.value.first.status
+    holding(PollSlots.limit)
+    commit_file('b.md', "b\n")
+    [newer, *polls.drop(1)].each { assert_equal 200, _1.value.first.status }
+  end
+
+  # Nor does it end the token's waiting poll
   def test_a_poll_without_a_version_needs_no_slot
-    polls = waiting(@token, @token)
+    polls = waiting(@token)
     get '/manifest', { 'v' => '1', 'wait' => '10' }, auth(@token)
     assert_equal 200, last_response.status
     commit_file('b.md', "b\n")
-    polls.each(&:join)
+    assert_equal 200, polls.first.value.first.status
   end
 
   def test_slots_come_back_after_a_timeout
-    waiting(@token, @token, wait: 1).each { assert_equal 304, _1.value.first.status }
+    laptop = add_token('laptop', 'test')
+    waiting(@token, laptop, wait: 1).each { assert_equal 304, _1.value.first.status }
     assert_equal 0, PollSlots.count
-    waiting(@token, @token, wait: 1).each { assert_equal 304, _1.value.first.status }
+    waiting(@token, laptop, wait: 1).each { assert_equal 304, _1.value.first.status }
   end
 
   def test_slots_come_back_after_an_error
@@ -102,12 +120,12 @@ class LongPollTest < VaultTest
     2.times { assert_equal 500, poll(@token).first.status }
     assert_equal 0, PollSlots.count
     @vault.feed.singleton_class.remove_method(:wait)
-    waiting(@token, @token, wait: 1).each(&:join)
+    waiting(@token, wait: 1).each(&:join)
   end
 
   # Shutdown (ChangeFeed.close_all closes every feed): the polls answer at once, their slots are back
   def test_slots_come_back_when_the_feed_closes
-    polls = waiting(@token, @token)
+    polls = waiting(@token, add_token('laptop', 'test'))
     @vault.feed.close
     polls.each do |thread|
       res, took = thread.value

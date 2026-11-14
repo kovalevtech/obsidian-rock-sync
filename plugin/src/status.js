@@ -20,6 +20,10 @@ export default class SyncStatus {
     this.lastOk = null; // Date of the last answer from the server (any request of the running sync, polls included)
     this.lastError = null; // { text, at: Date }
     this.listeners = new Set();
+    // The countdown to the poller's next try: listeners re-render every second while there is one
+    plugin.registerInterval(window.setInterval(() => {
+      if (plugin.poller?.problem?.retryAt) this.update();
+    }, 1000));
   }
 
   static describe(state) {
@@ -41,6 +45,21 @@ export default class SyncStatus {
     if (pausedFor === 'credentials') return 'Not connected: connect this vault below';
     if (pausedFor === 'unauthorized') return "Sync paused: the server refused this device's token. Connect it again (Reconnect in the admin panel)";
     return this.lastError?.text ?? null;
+  }
+
+  // Why the poller is backing off (the server may have answered: 429, 5xx…) and when it tries again
+  get offlineText() {
+    const { problem } = this.plugin.poller;
+    if (!problem) return "The server doesn't answer";
+    if (!problem.retryAt) return `${problem.text} · trying again`;
+    const seconds = Math.max(0, Math.ceil((problem.retryAt - Date.now()) / 1000));
+    return `${problem.text} · next try in ${seconds} s`;
+  }
+
+  // What's wrong, for the settings / tooltip: null while synced or syncing
+  get problemText() {
+    const { state } = this;
+    return state === 'error' ? this.errorText : state === 'offline' ? this.offlineText : null;
   }
 
   answered() {

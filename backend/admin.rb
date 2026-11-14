@@ -141,6 +141,14 @@ class Admin < Sinatra::Base
   CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; " \
         "frame-ancestors 'none'; base-uri 'none'"
 
+  # A vault's version served by the history (blob route): nothing loads, nothing runs, no origin
+  BLOB_CSP = "default-src 'none'; sandbox"
+  # The history's presets: rolling windows, in seconds
+  HISTORY_RANGES = { '24h' => ['Last 24 hours', 86_400], '7d' => ['Last 7 days', 7 * 86_400],
+                     '30d' => ['Last 30 days', 30 * 86_400], '1y' => ['Last year', 365 * 86_400] }.freeze
+  HISTORY_ACTIONS = { 'created' => 'Created', 'edited' => 'Edited', 'deleted' => 'Deleted', 'renamed' => 'Moved',
+                      'folder_deleted' => 'Folder deleted', 'folder_renamed' => 'Folder moved' }.freeze
+
   before do
     headers 'Cache-Control' => 'no-store', 'Content-Security-Policy' => CSP
     next if request.path_info == '/login'
@@ -196,6 +204,48 @@ class Admin < Sinatra::Base
     vault = Vault.find(params['name']) or halt 404
     vault.compact
     redirect '/vaults'
+  end
+
+  # A vault's history (History): the index caught up first (or "indexing…" while a thread does it), then a page of
+  # entries for the tab and the filters, all in the query
+  get '/vaults/:name/history' do
+    @vault = history_vault
+    @filters = history_filters
+    @indexing = History.catch_up(@vault) == :indexing
+    unless @indexing
+      @entries, @more = History.entries(@vault, **@filters.slice(:tab, :author, :path, :since, :till, :before))
+      @authors = History.authors(@vault)
+    end
+    erb :history
+  end
+
+  # One entry: an edit run's diff and its versions, a file's content, a folder's files; ?v=<event id> = one of its
+  # versions (a folder's file)
+  get '/vaults/:name/history/:id' do
+    @vault = history_vault
+    @entry = History.entry(@vault, params['id']) or halt 404
+    @events = History.events(@entry)
+    @event = params['v'] && (@events.find { _1[:id].to_s == params['v'] } or halt 404)
+    erb :history_entry
+  end
+
+  # A version's bytes: by vault and blob hash, only a blob the vault's index names (never a path). Shown inline only
+  # for images (the page's <img>: an SVG's scripts don't run there); anything else is a download. Its own CSP: opened
+  # directly, it's a sandboxed document of no origin — no script of an SVG runs in the admin's
+  get '/vaults/:name/blobs/:sha' do
+    vault = history_vault
+    sha = params['sha'].to_s
+    halt 404 unless sha.match?(/\A\h{40}\z/)
+    event = History.blob_event(vault, sha) or halt 404
+    content = vault.git.cat_file(sha) or halt 404 # not a blob
+
+    name = File.basename(event[:blob_after] == sha ? event[:path] : event[:old_path] || event[:path])
+    mime_type = History::Content.type(content.byteslice(0, 16), name)
+    inline = mime_type&.start_with?('image/') && params['download'] != '1'
+    headers 'Content-Security-Policy' => BLOB_CSP, 'X-Content-Type-Options' => 'nosniff',
+            'Content-Disposition' => disposition(inline ? 'inline' : 'attachment', name)
+    content_type(mime_type || 'application/octet-stream')
+    content
   end
 
   # Device tokens: a list (revoked ones with ?revoked=1, as on /scoped); each revoked or reconnected
@@ -322,5 +372,58 @@ class Admin < Sinatra::Base
 
     # notes:Inbox (rw), work:/ (w)
     def grant_label(grant) = "#{grant[:vault]}:#{grant[:folder].empty? ? '/' : grant[:folder]} (#{grant[:mode]})"
+
+    def history_vault = Vault.find(params['name']) || halt(404)
+
+    # The history page's tab and filters from the query: what the form and its links carry (strings, as typed) and
+    # what History.entries takes. Dates are UTC days (the admin shows UTC everywhere); a preset is a rolling window
+    # (`range`), applied with the dates if both are given. before: the last entry of the previous page
+    def history_filters
+      query = { tab: %w[deleted moves].include?(params['tab']) ? params['tab'] : nil,
+                author: params['author'].to_s.strip, path: params['path'].to_s.strip.delete("\r\n"),
+                from: day(params['from'])&.strftime('%F'), to: day(params['to'])&.strftime('%F'),
+                range: HISTORY_RANGES.key?(params['range']) ? params['range'] : nil }
+      from, to = day(params['from']), day(params['to'])
+      since = [from, (settings.gate.now - HISTORY_RANGES[query[:range]][1] if query[:range])].compact.max
+      before = params['before'].to_s.match(/\A(\d+)-(\d+)\z/)&.captures&.map(&:to_i)
+      { query:, tab: (query[:tab] || 'all').to_sym, author: query[:author], path: query[:path], since:,
+        till: to && to + 86_400, before: }
+    end
+
+    def day(text)
+      date = Date.strptime(text.to_s, '%Y-%m-%d') rescue nil
+      date && Time.utc(date.year, date.month, date.day)
+    end
+
+    # The history page with this tab / these filters changed (nil: dropped); a new filter starts at the first page
+    def history_path(**changes)
+      query = @filters[:query].merge(changes).reject { |_, v| v.to_s.empty? }
+      base = path("/vaults/#{@vault.name}/history")
+      query.empty? ? base : "#{base}?#{Rack::Utils.build_query(query.transform_keys(&:to_s))}"
+    end
+
+    def entry_path(entry, version = nil)
+      path("/vaults/#{@vault.name}/history/#{entry[:id]}#{"?v=#{version[:id]}" if version}")
+    end
+
+    def blob_path(sha, download: false) = path("/vaults/#{@vault.name}/blobs/#{sha}#{'?download=1' if download}")
+
+    # A version's time: autosaves are seconds apart
+    def time_s(at) = Time.at(at).utc.strftime('%Y-%m-%d %H:%M:%S UTC')
+
+    # 2026-11-14 10:02 UTC; a run: 10:02 – 12:58 the same day, else both in full
+    def time_range(first, last)
+      first, last = Time.at(first).utc, Time.at(last).utc
+      return time(first) if first.to_i / 60 == last.to_i / 60
+      return "#{first.strftime('%Y-%m-%d %H:%M')} – #{last.strftime('%H:%M')} UTC" if first.to_date == last.to_date
+
+      "#{first.strftime('%Y-%m-%d %H:%M')} – #{time(last)}"
+    end
+
+    # inline / attachment with the file's name: an ASCII fallback, and the name itself (RFC 6266)
+    def disposition(type, name)
+      ascii = name.encode('ASCII', invalid: :replace, undef: :replace, replace: '_').gsub(/[^ -~]|["\\]/, '_')
+      %(#{type}; filename="#{ascii}"; filename*=UTF-8''#{ERB::Util.url_encode(name)})
+    end
   end
 end

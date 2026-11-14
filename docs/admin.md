@@ -47,8 +47,43 @@ Lists each vault's sizes, its device tokens and its object counts. **Connect dev
 
 - **New vault:** `[a-z0-9-]`, at most 64 characters. If a repository with that name is already in `VAULTS_DIR`, it's adopted with its history.
 - **Compact:** runs `git gc` in the background. See [Storage](storage.md#compacting).
+- **History:** what happened to the vault's files, see below.
 
 Vaults can't be deleted or renamed here.
+
+## History
+
+A vault's **History** answers "what happened to my files, who did it, when", without scrolling through every autosave. It only shows; nothing can be restored from it yet.
+
+Three tabs:
+
+- **All:** every entry, newest first.
+- **Deleted:** files and folders that are deleted now. A file created again at the same path leaves the list.
+- **Moves:** renames and moves.
+
+Entries group the commits:
+
+| Entry | What it is |
+|---|---|
+| Edited | One file, one author, each commit less than 15 minutes after the previous one. The window slides: three hours of autosaves every few seconds are one entry. Edits to other files in between don't split it; an edit by another author does. Server merges and MCP appends count as edits |
+| Created | The same, starting with the file's creation |
+| Deleted, Moved | Always an entry of their own; they end the file's run |
+| Folder deleted, Folder moved | A folder deleted or renamed in Obsidian reaches the server as one commit per file plus one for the folder. Those commits become one entry, with its files one click away: the deletions (renames) of one author, each less than a minute after that author's previous one, under a folder whose own deletion (rename) is among them. A subfolder goes into the outermost folder |
+
+Each entry shows the file, the author (name and kind: `device`, `token` for MCP, `unknown` for the server's own commits and adopted history), the time span and the number of versions. Open one to see:
+
+- **Edits:** a diff from the version before the run to its last version, then each version's own diff.
+- **A created or deleted file:** its content (for a deleted one, the last version).
+- **Images:** shown. **PDFs and other binary files:** size and a download.
+- **Too large:** text over 1 MB or a diff over 5000 lines. Download only.
+
+**Filters** apply to every tab and stay in the URL: author (any part of the name, any case; the field suggests the names in the history), file (any part of the path, so a folder's path finds what's in it), dates and presets (the last 24 hours, 7 days, 30 days, year). Dates and times are UTC, as everywhere in the panel.
+
+Not shown: hidden paths (`.plugins/…`, anything with a segment starting with a dot) and folders' `.keep` files. Renames aren't followed: a file's history before it got its name is under its old name.
+
+Downloads are served as attachments, under a policy that runs nothing, so a file from a device can't do anything in the panel. That includes SVG images, which are shown only as images.
+
+The history is indexed in the database when the page opens: the first time the whole history (a 50,000-commit vault took about a second; past 100,000 new commits it runs in the background and the page shows "Indexing…"), later only the new commits. The index is a cache: it can be deleted at any time, and is rebuilt when the history was rewritten.
 
 ## Device tokens
 

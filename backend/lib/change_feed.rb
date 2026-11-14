@@ -44,13 +44,14 @@ class ChangeFeed
     end
   end
 
-  # Blocks until the version the block returns differs from known, or timeout seconds pass. The check and the wait
-  # happen under the lock, so a commit's notify can't slip in between them. Checked again every RECHECK seconds
-  def wait(known, timeout)
+  # Blocks until the version the block returns differs from known, timeout seconds pass, or poll (PollSlots::Poll) is
+  # ended. The check and the wait happen under the lock, so a commit's notify can't slip in between them. Checked
+  # again every RECHECK seconds
+  def wait(known, timeout, poll = nil)
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout.clamp(0, MAX_WAIT)
     @lock.synchronize do
       loop do
-        return if @closed || yield != known
+        return if @closed || poll&.ended? || yield != known
 
         remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
         return if remaining <= 0

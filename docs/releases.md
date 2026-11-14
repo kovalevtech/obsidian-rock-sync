@@ -30,8 +30,13 @@ The server now checks every path against one rule ([Storage](storage.md#paths)) 
 
 ### Long polls, form bodies, the vault header, logs
 
-- **Long polls are capped:** at most 2 waiting polls per token and 12 per server process. One over gets `429` with `Retry-After: 5` at once; the plugin backs off as after any failed poll. A poll whose token was revoked while it waited gets `401` instead of the manifest ([API](api.md)).
+- **Long polls are capped:** one waiting poll per token and 12 per server process. A token's new poll ends its older one, which answers `304` at once: a poll left behind by a closed vault window or a reload no longer gets the next one refused. One over the process' 12 gets `429` with `Retry-After: 5` at once; the plugin backs off as after any failed poll. A poll whose token was revoked while it waited gets `401` instead of the manifest ([API](api.md)).
 - **Form bodies get `415`:** the sync API and MCP never read `application/x-www-form-urlencoded` or `multipart/*` bodies. Without credentials such a request gets the usual `401`. A script using curl's `-d` / `--data-binary` needs `-H 'Content-Type: application/octet-stream'` (or `text/markdown`).
 - **`X-Rock-Sync-Vault` on every route:** `GET /vaults` and `DELETE /token` now refuse the header too when it isn't the token's vault (`401`, as elsewhere). The plugin sends it with `DELETE /token`, so a proxy allowing one vault lets its Remove through.
 - **Verbose logs carry less:** with `VERBOSE_HTTP_LOGS` on, credential-like headers (`Proxy-Authorization`, Cloudflare Access headers, anything named like a token, key or secret) and answer bodies (file content, manifests) are left out. It's for debugging, not for production.
 - **rack 3.2.8, sqlite3 2.10.2**, for their security advisories.
+
+### Plugin: Sync now, and why it's offline
+
+- **Sync now** in the settings (always there while connected, instead of **Retry**) and as a command (instead of **Check manifest**): retries what failed and compares with the server at once, without waiting for the pause after a failure.
+- **Offline says why:** no connection (with the error) or the server's answer (`429`, `502`, …), and a countdown to the next attempt. Before, every failed poll read "The server doesn't answer".

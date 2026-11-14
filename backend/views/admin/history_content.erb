@@ -1,0 +1,22 @@
+<%# A version as History::Content describes it (view): raw text, a diff, an image, or its size and a download %>
+<% download = view[:sha] && %(<a class="btn small" href="#{h blob_path(view[:sha], download: true)}">Download</a>) %>
+<% case view[:kind] %>
+<% when :diff %>
+  <pre class="diff"><% view[:lines].each do |line| %><span class="<%= { '+' => 'add', '-' => 'del', '@' => 'hunk' }[line[0]] %>"><%= h line.chomp %></span><% end %></pre>
+  <p class="row"><%= bytes(view[:size]) %> <%= download %></p>
+<% when :text %>
+  <% if view[:unchanged] %><p class="muted">Content unchanged.</p><% end %>
+  <pre class="text"><%= h view[:text] %></pre>
+  <p class="row"><%= bytes(view[:size]) %> <%= download %></p>
+<% when :image %>
+  <p><img class="version" src="<%= h blob_path(view[:sha]) %>" alt=""></p>
+  <p class="row"><%= h view[:mime_type] %> · <%= bytes(view[:size]) %> <%= download %></p>
+<% when :pdf %>
+  <p class="row">PDF · <%= bytes(view[:size]) %> <%= download %></p>
+<% when :too_large %>
+  <p class="row">Too large to show here (<%= bytes(view[:size]) %><%= ", a diff of #{view[:lines]} lines" if view[:lines] %>). <%= download %></p>
+<% when :binary %>
+  <p class="row">Binary · <%= bytes(view[:size]) %> <%= download %></p>
+<% else %>
+  <p class="muted">This version isn't in the repository any more.</p>
+<% end %>

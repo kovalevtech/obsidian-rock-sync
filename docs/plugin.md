@@ -39,7 +39,11 @@ Your edits go up as Obsidian saves them. Other devices' changes arrive within se
 
 ## Status
 
-An icon next to the vault's name shows the state (in the ribbon if there's no room for it). Click it to open the settings, where the same state appears with the last sync and the last error, plus **Retry**.
+An icon next to the vault's name shows the state (in the ribbon if there's no room for it). Click it to open the settings, where the same state appears with the last sync and the last error, plus **Sync now**.
+
+When offline, the settings say why the last attempt failed: no connection (with the error, such as `net::ERR_CONNECTION_REFUSED`), or the server's answer (`429`, `502`, …), and counts down to the next attempt. Failed attempts are retried by themselves, with pauses growing up to a minute.
+
+**Sync now** (also a command) doesn't wait for those pauses: it retries what failed and compares with the server right away. After the token was refused, it tries the saved one again. A request already on its way can't be cut short.
 
 | Icon | Meaning |
 |---|---|
@@ -113,10 +117,10 @@ A notice counts what's waiting. Decide file by file from the bar, or in bulk wit
 | Review deletions from other devices | Lists deleted files |
 | Review conflict copies | Lists conflict copies |
 | Review files from first sync | Lists files waiting for review |
-| Check manifest | Compares with the server right now |
+| Sync now | Retries what failed and compares with the server right now, without waiting for the pause after a failure |
 
 ## Troubleshooting
 
 - **Paused, the token was refused:** the token was revoked. **Reconnect** it in the admin panel and connect with that code: same name, same vault, nothing to review.
-- **Offline though the server is up:** check the URL from the device's browser (`<server>/health` answers `ok`), then check the [proxy settings](deployment.md#reverse-proxy).
+- **Offline though the server is up:** the settings say why. No connection: check the URL from the device's browser (`<server>/health` answers `ok`). An answer such as `502`, or "answered at once instead of holding the poll": check the [proxy settings](deployment.md#reverse-proxy).
 - **Details:** turn on **Debug logging** in the settings and open the developer console (`Cmd+Opt+I` / `Ctrl+Shift+I`). The messages are at the Verbose level, which the console may hide by default.
