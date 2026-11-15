@@ -21,7 +21,6 @@ class McpTest < VaultTest
 
   def setup
     super
-    McpTools::RATE.reset
     %w[Inbox Journal Archive Notes Notes/Drafts Inbox2].each { commit_file("#{_1}/.keep", '') }
     @claude, @secret = Devices.create_scoped(name: 'claude', grants: rows(GRANTS))
   end

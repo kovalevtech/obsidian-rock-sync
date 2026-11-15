@@ -30,6 +30,9 @@ require 'digest'
 
 class VaultTest < Minitest::Test
   def setup
+    # In memory, per process: calls left by other tests (in any order) mustn't count here
+    Pairings::ATTEMPTS.reset
+    McpTools::RATE.reset
     @root = Dir.mktmpdir('vault-test-')
     @vaults_dir = File.join(@root, 'vaults')
     ENV['VAULTS_DIR'] = @vaults_dir

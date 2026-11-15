@@ -10,11 +10,6 @@ class PairingTest < VaultTest
 
   def app = App
 
-  def setup
-    super
-    Pairings::ATTEMPTS.reset
-  end
-
   def pair(code, name = 'pixel')
     post '/pair', JSON.generate(code:, name:), 'CONTENT_TYPE' => 'application/json'
     last_response

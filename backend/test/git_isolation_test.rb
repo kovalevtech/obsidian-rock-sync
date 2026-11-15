@@ -18,7 +18,6 @@ class GitIsolationTest < VaultTest
 
   def setup
     super
-    McpTools::RATE.reset
     @a = commit_file('a.md', "a\n")
     @b = commit_file('b.md', "b\n")
     basic_authorize('test', @token)
